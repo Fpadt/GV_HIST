@@ -1,0 +1,428 @@
+---
+title: "Legacy Sales - Vision Express UK - 2015H1"
+author: "F.J.Padt"
+date: "`r Sys.Date()`"
+output: 
+   pdf_document:
+    toc:             true
+    toc_depth:       2
+    number_sections: true
+    fig_caption:     true
+    fig_crop:        true
+    highlight:       tango    
+---
+
+\newpage
+![Logo](http://www.grandvision.com/img/logoGV.png) 
+
+```{r RSetup, echo=FALSE, eval=TRUE, cache=FALSE, results='hide'}
+
+source('~/RW/QAR/00_RProj/00_Global/iSynGeneral.R')
+
+# Data Settings
+fECHO    <- FALSE
+fEVAL    <- TRUE
+fRESULTS <- 'hide' 
+
+# SAP systems to use
+pECC_SYST <- "RA1"
+pECC_CLNT <- "250"
+pBI_SYST  <- "BA1" 
+pBI_CLNT  <- "200"
+pLGCINDC  <- "H"
+
+# Data Settings
+pOPCO     <- "VEUK"
+pROWS     <- -1L
+pSMALL    <- 1000
+pEXP      <- TRUE
+pPART     <- "2014H1"
+pFILE     <- paste(  pOPCO       ,      pBI_SYST,      pPART, sep="_") 
+pSRCF     <- paste0("VBRP"       , "_", pBI_SYST, "_", pPART, ".csv")
+pEXPORT   <- paste0("POS_HISTORY", "_", pBI_SYST, "_", pPART, ".csv") 
+
+# Open Excel for storing results
+if(file.exists(paste0(pPath, "/", pOPCO, ".xlsx")) == TRUE){
+  file.remove(paste0(pPath, "/", pOPCO, ".xlsx"))
+}
+fWriteToSheet(data.frame(ECCSYST = pECC_SYST, 
+                         ECCCLNT = pECC_CLNT,
+                         BI_SYST = pBI_SYST ,
+                         BI_CLNT = pBI_CLNT), 
+              pPath, pOPCO, "PARAM"   , pAppend = FALSE )
+```
+
+```{r SplitVBRP, echo=FALSE, eval=FALSE, results='hide'}
+# dtVBRP <- fread(file.path(".", "RAW_DATA", "VBRP_GOLALL.txt"), 
+#                 sep=";", nrows = pROWS)
+# setkey(dtVBRP, "VBELN")
+# 
+# l_months <- sort(unique(substr(dtVBRP$FBUDA, 1, 6)))
+# 
+# write.table(dtVBRP[substr(dtVBRP$FBUDA, 1, 6) %in% l_months[1:6]], 
+#             file = file.path("c:", "FTP", 
+#                              paste0("VBRP, "_", 
+#                                     pBI_SYST, "_", "2014H1", ".csv")),
+#             quote = TRUE     , sep = ";", na = "", dec = ".",           
+#             row.names = FALSE, col.names = TRUE, append = FALSE)
+# 
+# write.table(dtVBRP[substr(dtVBRP$FBUDA, 1, 6) %in% l_months[7:12]], 
+#             file = file.path("c:", "FTP", 
+#                              paste0("VBRP, "_", 
+#                                     pBI_SYST, "_", "2014H2", ".csv")),
+#             quote = TRUE     , sep = ";", na = "", dec = ".",           
+#             row.names = FALSE, col.names = TRUE, append = FALSE)
+# 
+# write.table(dtVBRP[substr(dtVBRP$FBUDA, 1, 6) %in% l_months[13:17]], 
+#             file = file.path("c:", "FTP", 
+#                              paste0("VBRP, "_", 
+#                                     pBI_SYST, "_", "2015H2", ".csv")),
+#             quote = TRUE     , sep = ";", na = "", dec = ".",           
+#             row.names = FALSE, col.names = TRUE, append = FALSE)
+# rm(list=ls())
+```
+
+
+```{r ReadRawData, echo=fECHO, eval=fEVAL, results=fRESULTS}
+
+dtMEAN       <- fGetTable(pTable = "MEAN", pKey = c("MATNR", "MEINH"),
+                          pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtMEAN       <- dtMEAN[, MATNR:= as.character(MATNR)]
+
+dtADRC       <- fGetTable(pTable = "ADRC", 
+                          pSystID = "RP1", pClient = "300")
+
+dtT001W      <- fGetTable(pTable = "T001W", pKey = c("WERKS"),
+                          pSystID = "RP1", pClient = "300")
+
+
+dtRSDSSEGFD  <- fGetTable(pTable = "RSDSSEGFD", 
+                          pKey = c("DATASOURCE", "POSIT"),
+                          pSystID = pBI_SYST, pClient = pBI_CLNT)
+dtRSDSSEGFD  <- dtRSDSSEGFD[DATASOURCE == "G0_DS_LEGACY_SLS_TD" ]
+
+dtRSDSSEGFDT <- fGetTable(pTable = "RSDSSEGFDT", 
+                          pKey = c("DATASOURCE", "POSIT"), 
+                          pSystID = pBI_SYST, pClient = pBI_CLNT)
+dtRSDSSEGFDT <- dtRSDSSEGFDT[DATASOURCE == "G0_DS_LEGACY_SLS_TD" ]
+
+dtVBRK <- fread(file.path(".", "RAW_DATA", "VBRK_GOL.txt"), 
+                sep=";", nrows = pROWS)
+setkey(dtVBRK, "VBELN")
+
+dtVBRP <- fread(file.path(".", "RAW_DATA", pSRCF), 
+                sep=";", nrows = pROWS)
+setkey(dtVBRP, "VBELN")
+
+dtSDP_VE    <- fread(file.path(".", "RAW_DATA", "SDP_VE.csv"), 
+                sep=";")
+setkey(dtSDP_VE, "WERKS")
+
+dtMARA      <- fread(file.path(".", "RAW_DATA", "MARA.csv"), 
+                sep=";")
+setkey(dtMARA, "MATNR")
+
+```
+
+# Historical Data #
+
+The historical data for `r pOPCO` is extracted from Billing (VBRK & VBRP). 
+The tables are merged which results in a  subset of the standard SAP extractor 
+2LIS_13_VDITM which is used in the iSynery Project.
+
+## SQL-statements:
+The following SQL-statements where used to extract the data.  
+Note: some fields are empty but extracted just for clarity reasons.  
+
+### VBRK
+> SELECT VBELN, FKDAT, FKART, VKORG, VTWEG, BSTNK_VF, 
+>        VBTYP, FKSTO, KURST,  KURRF, WAERK, STWAE
+>   FROM VBRK
+>     WHERE MANDT = '902' AND FKDAT > '20131231'
+
+From:    `r min(dtVBRK$FKDAT)` 
+To:      `r max(dtVBRK$FKDAT)`
+Records: `r nrow(dtVBRK)`
+
+### VBRP
+> SELECT VBELN, POSNR, MATNR, WERKS, FKIMG, FKLMG, 
+>        KZWI1, KZWI2, KZWI3, KZWI4, KZWI5, KZWI6, 
+>        NETWR, MWSBP, WAVWR, 
+>        SHKZG, VGPOS, VGBEL, FAREG, 
+>        VRKME, MEINS, STCUR, FBUDA     
+>   FROM VBRP 
+>     WHERE MANDT  = '902'  AND FBUDA > '20131231'
+
+From:    `r min(dtVBRP$FBUDA)` 
+To:      `r max(dtVBRP$FBUDA)`
+Records: `r nrow(dtVBRP)`
+
+## Source Data 
+
+```{r PrepareDataSet, echo=fECHO, eval=fEVAL, results=fRESULTS}
+dtTMP04 <- dtVBRP[MATNR == " "] # MATNR == "A9990002" |
+if(nrow(dtTMP04) > 0){
+  fWriteToSheet(dtTMP04, pFILE, "Records_DEL", pAppend = TRUE)
+  dtVBRP <- dtVBRP[MATNR != " "] # MATNR != "A9990002" & 
+  }
+
+dtDATA <- merge(dtVBRK, dtVBRP, by = "VBELN")
+setkey(dtDATA, "VBELN")
+
+dtDATA <- dtDATA[, MATNR:= gsub("(^|[^0-9])0+", "\\1", MATNR, perl = TRUE)]
+
+# rm(dtVBRK, dtVBRP)
+# gc()
+```
+
+Below the structure of the source data and the number of records is displayed
+
+```{r displayDetailMean, echo=fECHO, eval=fEVAL, results='markup'}
+
+str(dtDATA)
+head(dtDATA[, c(1:7)             , with = FALSE])
+head(dtDATA[, c(8:15)            , with = FALSE])
+head(dtDATA[, c(16:23)           , with = FALSE])
+head(dtDATA[, c(24:ncol(dtDATA)) , with = FALSE])
+
+# fWriteToSheet(as.data.frame(str(dtDATA)), pFILE, "Structure", pAppend = TRUE)
+fWriteToSheet(head(dtDATA[1:10])        , pFILE, "dtDATA"   , pAppend = TRUE)
+```
+
+```{r ChangeDataTypes, echo=fECHO, eval=fEVAL, results=fRESULTS}
+# Change data Types and set NA to 0
+system.time(
+  dtDATA <- dtDATA[, `:=`(
+    FKIMG = ifelse(is.na(FKIMG), 0, as.integer(FKIMG)),
+    FKLMG = ifelse(is.na(FKLMG), 0, as.integer(FKLMG)),
+    KZWI1 = ifelse(is.na(KZWI1), 0, as.numeric(sub(",", ".", KZWI1))),
+    KZWI2 = ifelse(is.na(KZWI2), 0, as.numeric(sub(",", ".", KZWI2))),
+    KZWI3 = ifelse(is.na(KZWI3), 0, as.numeric(sub(",", ".", KZWI3))),
+    KZWI4 = ifelse(is.na(KZWI4), 0, as.numeric(sub(",", ".", KZWI4))), 
+    KZWI5 = ifelse(is.na(KZWI5), 0, as.numeric(sub(",", ".", KZWI5))),
+    KZWI6 = ifelse(is.na(KZWI6), 0, as.numeric(sub(",", ".", KZWI6))),
+    NETWR = ifelse(is.na(NETWR), 0, as.numeric(sub(",", ".", NETWR))), 
+    MWSBP = ifelse(is.na(MWSBP), 0, as.numeric(sub(",", ".", MWSBP))), 
+    WAVWR = ifelse(is.na(WAVWR), 0, as.numeric(sub(",", ".", WAVWR))))])
+
+gc()
+```
+
+### Data Source
+
+```{r LegacyStoreToSAP, echo=FALSE, results=fRESULTS}
+# add the iSynergy Store next to the legacy store
+# timing: 18 sec.
+setnames(dtADRC, "ADDRNUMBER", "ADRNR")
+
+dtWERKS  <- merge(dtT001W[ , .(ADRNR, WERKS, VKORG, VTWEG, VLFKZ)], 
+                  dtADRC[  , .(ADRNR, SORT2)],
+                  all.x = TRUE, by = "ADRNR")
+rm(dtT001W, dtADRC)
+gc()
+
+# Select only UK stores
+dtWERKS  <- dtWERKS[substr(VKORG, 1, 2) %in% c("GB", "IE")]
+
+# Remove stores which are not Mapped
+dtTMP01  <- dtWERKS[ is.na(SORT2)][, SORT2:= NULL]
+fWriteToSheet(dtTMP01, pFILE, "WERKS_NO_SORT2", pAppend = TRUE )
+
+dtWERKS  <- dtWERKS[!is.na(SORT2)] 
+
+# Add Sales Org from list which include the closed Stores
+dtSDP_01  <- dtSDP_VE[, SORT2:= substr(WERKS, 2,4)]
+setnames(dtSDP_01, c("WERKS"), c("LWRKS"))
+
+dtWERKS   <- merge(dtWERKS, 
+                   dtSDP_01, 
+                   all.y = TRUE, by = "SORT2" )
+# dtORG     <- dtWERKS[, .N, by =.(VKORG, SALESORG)]
+dtWERKS   <- dtWERKS[, .(WERKS, LWRKS, SALESORG, DISTR_CHAN)]
+
+# Quality check on Duplicates
+dtWERKS  <- dtWERKS[, DUP:= duplicated(dtWERKS, by = "LWRKS")]
+
+dtTMP02  <- copy(dtWERKS)
+dtTMP02  <- dtTMP02[, DUP:= any(DUP)          , by = "LWRKS" ]
+dtTMP02  <- dtTMP02[DUP == TRUE ]
+fWriteToSheet(dtTMP02, pFILE, "WERKS_DUP", pAppend = TRUE )
+fWriteToSheet(dtWERKS[DUP == TRUE], 
+              pFILE, "LWRKS_DEL", pAppend = TRUE )
+
+dtWERKS  <- dtWERKS[DUP == FALSE][, DUP:=NULL]
+
+# Add the iSynergy Site to the Data Set based upon Legacy site  
+setnames(dtDATA, c("WERKS"), c("LWRKS"))
+
+# stores With Sales
+dtWERKS <- dtWERKS[LWRKS %in% unique(dtDATA$LWRKS)]
+
+# Introduce dummy stores for closed stores which are not in iSYnergy
+l_WERKS <- nrow(dtWERKS[is.na(WERKS)])
+dtWERKS <- dtWERKS[, WERKS:= ifelse(is.na(WERKS),
+                                    paste0(pLGCINDC, 
+                                    str_pad(1:l_WERKS, 3, pad ="0")),
+                                    WERKS)]
+
+dtDATA  <- merge(dtWERKS, dtDATA, 
+                 all.y = TRUE, by = "LWRKS")
+dtDATA  <- dtDATA[, `:=`(VKORG      = SALESORG, 
+                         VTWEG      = DISTR_CHAN,
+                         SALESORG   = NULL,
+                         DISTR_CHAN = NULL)]
+rm(dtWERKS)
+```
+
+## Store Mapping
+
+Following Stores could not be mapped and are removed from the store Master Data:
+
+```{r Non-Mapped_Stores, echo=fECHO, eval=fEVAL, results=fRESULTS}
+dtTMP01
+dtTMP02
+```
+
+### Legacy & SAP Site
+
+The legacy site in the hsitorical data is named LWRKS. 
+The related SAP Site (WERKS) is joined based upon the last SORT2 field.
+Note that the last 3 characters are used from teh legacy site as teh SORT2 field
+doesnt have the J, V and I anymore.
+
+Át the same time the iSynergy Sales organization and the distribution channel is
+added to the transactional data. This can be used for connecting the Sales Organization 
+specific article master data (0MAT_SALES coming from MVKE)
+
+
+result: `r str(dtDATA)`
+
+### Legacy & SAP Article
+
+Next the related SAP article will be added to teh historical data if exisitng.
+For this the mapping table MEAN is used from client 250 for EANTP = Z2. 
+In case no SAp article exist the field will be empty. 
+
+```{r LegacyArticleToSAP, echo=fECHO, eval=fEVAL, results=fRESULTS }
+dtMATNR <- dtMEAN[MEINH == "ST" & 
+                    EANTP == "Z2" &
+                    EAN11 != "DUPLICATE", 
+                  .(MATNR, EAN11, EANTP)]
+setnames(dtMATNR, c("EAN11"), c("LMTNR"))
+
+# Quality check on Duplicates
+dtMATNR  <- dtMATNR[, DUP:= duplicated(dtMATNR, by = "LMTNR")]
+
+dtTMP03  <- copy(dtMATNR)
+dtTMP03  <- dtTMP03[, DUP:= any(DUP)          , by = "LMTNR" ]
+dtTMP03  <- dtTMP03[DUP == TRUE ][, DUP:=NULL]
+fWriteToSheet(dtTMP03, pFILE, "MEAN_DUP", pAppend = TRUE )
+fWriteToSheet(dtMATNR[DUP == TRUE], 
+              pFILE, "LMNTR_DEL", pAppend = TRUE )
+
+dtMATNR  <- dtMATNR[DUP == FALSE][, DUP:=NULL]
+
+# Add the iSynergy Article next to the legacy article
+setnames(dtDATA, c("MATNR"), c("LMTNR"))
+
+# All Articles With Sales 
+dtMATNR <- merge(data.table(LMTNR = unique(dtDATA$LMTNR)),
+                 dtMATNR,
+                 by = "LMTNR", all.x= TRUE)
+
+# Introduce dummy Articles for Articles which are not in iSYnergy
+dtMATNR <- dtMATNR[, 
+                   `:=` (EANTP = "Z2",
+                         MATNR = ifelse(is.na(MATNR),
+                                        paste0(pLGCINDC, 
+                                               str_pad(1, 17, pad ="0")),
+                                        MATNR))]
+
+dtDATA <- merge(dtMATNR, 
+                dtDATA, 
+                by = "LMTNR", all.y = TRUE )
+# rm(dtMATNR, dtMEAN)
+# gc()
+```
+
+
+```{r  Calculations, echo=fECHO, eval=fEVAL, results=fRESULTS}
+
+dtDATA <- dtDATA[, `:=`(
+  VGBEL      =   toupper(VGBEL),     # lowercase not allowed in 0REFER_DOC
+  BSTNK_VF   =   toupper(BSTNK_VF),   # lowercase not allowed in 0RPA_TCC
+  RPA_PAI    =            VBELN,     # Partner Number
+  EANTP      =             "Z2",     # Split by OPCO
+#   KZWI1      =    NETWR + MWSBP,     # Net valie inc. tax (note KZWI2 must be 0)
+#   KZWI2      =                0,     #
+  RPA_REAWT  =  (KZWI1 - KZWI2),     # Discount value including Tax   
+  RPA_DRC    =               NA,     # Discount reason           
+  G1LINK     =               NA,     # GVBNL lInk Field 
+  RECORDMODE =              "N")]    # Technical D,N,A,I         
+
+```
+
+final Result: `r str(dtDATA)`
+
+## Create Export File
+
+The resulting file is exported to .csv format using a , as list-separator.
+The file wil lhave 1 header row with the names, The decimal separator will be .
+
+```{r EXPORT, echo=fECHO, eval=fEVAL, results=fRESULTS}
+# Get Datasource fields in the right order
+dtDS         <- merge(dtRSDSSEGFD, 
+                      dtRSDSSEGFDT[, .(POSIT, TXTLG )], 
+                      by = "POSIT")
+dtDS         <- dtDS[, .(SYSTID, DATASOURCE, POSIT, 
+                         FIELDNM, DATATYPE, DECIMALS, IOBJNM,TXTLG)]
+
+# Select and Order the fields in the same order as the DataSource
+dtDATA <- dtDATA[, dtDS$FIELDNM, with = FALSE]
+
+# ZFTP_FN_POS_HISTORY
+# usr/sap/BA1/FTP/POS/HISTORY/POS_HISTORY.csv
+l_months <- sort(unique(substr(dtDATA$FKDAT, 1, 6)))
+
+if(pEXP){
+  write.table(dtDATA, 
+              file = file.path("c:", "FTP", pEXPORT),
+              quote = TRUE     , sep = ";", na = "", dec = ".",             
+              row.names = FALSE, col.names = TRUE, append = FALSE)
+  }
+
+write.table(dtDATA[1:pSMALL], 
+            file = file.path("c:", "FTP", 
+                             paste0("POS_HISTORY_small", "_", 
+                                    pECC_SYST, ".csv")),
+            quote = TRUE     , sep = ";", na = "", dec = ".",           
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+
+fWriteToSheet(dtDATA[1:pSMALL], pFILE, "POS", pAppend = FALSE )
+```
+
+# Result
+
+The structure below shows a part of the generated file
+
+```{r displayResult, echo=fECHO, eval=fEVAL, results='markup'}
+any(is.na(dtDATA$MATNR))
+any(is.na(dtDATA$WERKS))
+
+setdiff(names(dtDATA), dtDS$FIELDNM)
+setdiff(dtDS$FIELDNM, names(dtDATA))
+ 
+l_months
+
+str(dtDATA)
+head(dtDATA[, c(1:5)            , with = FALSE])
+head(dtDATA[, c(6:10)           , with = FALSE])
+head(dtDATA[, c(11:15)          , with = FALSE])
+head(dtDATA[, c(16:20)          , with = FALSE])
+head(dtDATA[, c(21:25)          , with = FALSE])
+head(dtDATA[, c(26:30)          , with = FALSE])
+head(dtDATA[, c(31:35)          , with = FALSE])
+head(dtDATA[, c(36:ncol(dtDATA)), with = FALSE])
+
+
+```

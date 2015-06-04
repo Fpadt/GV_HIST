@@ -1,0 +1,370 @@
+---
+title: "POS History"
+author: "F.J.Padt"
+date: "`r Sys.Date()`"
+OpCo: Vision Express UK
+output: 
+   pdf_document:
+    toc:             true
+    toc_depth:       2
+    number_sections: true
+    fig_caption:     true
+    fig_crop:        true
+    highlight:       tango    
+---
+
+\newpage
+![Logo](http://www.grandvision.com/img/logoGV.png) 
+
+```{r RSetup, echo=FALSE, eval=TRUE, cache=FALSE, results='hide'}
+
+source('~/RW/QAR/00_RProj/00_Global/iSynGeneral.R')
+
+fECHO    <- TRUE
+fEVAL    <- TRUE
+fRESULTS <- 'hide' 
+
+# SAP systems to use
+pECC_SYST <- "RA1"
+pECC_CLNT <- "250"
+pBI_SYST  <- "BA1" 
+pBI_CLNT  <- "200"
+
+# Data Settings
+pOPCO     <- "Vision Express UK"
+pROWS     <- -1L
+```
+
+```{r ReadRawData, echo=fECHO, eval=fEVAL, results=fRESULTS}
+
+dtMEAN      <- fGetTable(pTable = "MEAN", pKey = c("MATNR", "MEINH"),
+                         pSystID = pECC_SYST, pClient = pECC_CLNT)
+
+dtADRC      <- fGetTable(pTable = "ADRC", 
+                         pSystID = "RP1", pClient = "300")
+
+dtT001W     <- fGetTable(pTable = "T001W", pKey = c("WERKS"),
+                         pSystID = "RP1", pClient = "300")
+
+dtRSDSSEGFD <- fGetTable(pTable = "RSDSSEGFD", 
+                         pSystID = pBI_SYST, pClient = pBI_CLNT)
+
+dtVBRK <- fread(file.path(".", "RAW_DATA", "VBRK_TCO.txt"), 
+                sep=";", nrows = pROWS)
+dtVBRK <- dtVBRK[, .(VBELN, BSTNK_VF, WAERK, FKDAT)]
+setkey(dtVBRK, "VBELN")
+
+dtVBRP <- fread(file.path(".", "RAW_DATA", "VBRP_TCO.txt"), 
+                sep=";", nrows = pROWS)
+dtVBRP <- dtVBRP[, .(VBELN, MATNR, WERKS, FKIMG, 
+                     KZWI1, KZWI2, MWSBP, WAVWR, VRKME)]
+setkey(dtVBRP, "VBELN")
+
+dtSDP_VE    <- fread(file.path(".", "RAW_DATA", "SDP_VE.csv"), 
+                sep=";")
+setkey(dtSDP_VE, "WERKS")
+
+dtT001WUK   <- fread(file.path(".", "RAW_DATA", "T001W.txt"), 
+                sep=";")
+dtT001WUK   <- dtT001WUK[, .(WERKS, VKORG, VTWEG)] 
+setkey(dtT001WUK, "WERKS")
+#dtVBRP <- dtVBRP[, VRKME:= "ST" ]
+```
+
+# Historical Data #
+
+The historical data for `r pOPCO` is extracted from Billing (VBRK & VBRP).  
+VBRK is used to add the document currency.
+
+Note the resulting file will be a subset of the iSynergy extractor 
+(2LIS_13_VDITM). 
+
+## SQL-statements:
+The following SQL-statements where used to extract the data.  
+Note more fields are currently extracted than used in the upload.
+
+### VBRK
+> SELECT VBELN, FKART, BSTNK_VF, WAERK, VKORG, VTWEG, KALSM, FKDAT
+>  FROM VBRK
+>    WHERE MANDT = '902' AND
+>      FKDAT > '20131231'
+
+### VBRP
+> SELECT VBELN, MATNR, WERKS, FBUDA, FKIMG,  
+>        KZWI1, KZWI2, KZWI4, EAN11, KONDM, 
+>        MATKL,  MWSBP, PRODH, SHKZG, WAVWR, VRKME, SHKZG  
+>   FROM VBRP 
+>     WHERE MANDT  = '902'  AND
+>           PSTYV =  'DLN' AND FBUDA > '20131231'
+
+## Source Data 
+
+Below the structure of the source data and the number of records is displayed
+
+```{r PrepareDataSet, echo=fECHO, eval=fEVAL, results=fRESULTS}
+dtVBRP <- dtVBRP[MATNR != "A9990002"]
+
+dtDATA <- merge(dtVBRK[, .(VBELN, WAERK, BSTNK_VF, FKDAT)], 
+                dtVBRP, 
+                all.y = TRUE, by = "VBELN")
+setkey(dtDATA, "VBELN")
+
+```
+
+```{r LegacyToSAP, echo=fECHO, eval=fEVAL, results=fRESULTS}
+
+setnames(dtDATA,
+         c("VBELN"             , "MATNR"           , "WERKS"    ,    
+           "FKDAT"             , "FKIMG"           , 
+           "KZWI1"             , "MWSBP"           , "WAVWR"    ,
+           "WAERK"             , "BSTNK_VF"        , "VRKME"),
+
+         c("RPA_PAI"           , "G1LGART"         , "G1LGSTNO" ,
+           "CALDAY"            , "QUANTITY"        , 
+           "G1NETSAIT"         , "TAX_AMOUNT"      , "COST"     ,
+           "DOC_CURRCY"        , "RPA_TTC"         , "UNIT"))
+       
+```
+
+```{r displayDetailMean, echo=fECHO, eval=fEVAL, results='markup'}
+str(dtDATA)
+head(dtDATA[, c(1:6), with = FALSE])
+head(dtDATA[, c(7:12), with = FALSE])
+
+```
+
+```{r ChangeDataTypes, echo=fECHO, eval=fEVAL, results=fRESULTS}
+dtDATA <- dtDATA[, `:=`(
+  QUANTITY        = as.integer(QUANTITY),
+  G1NETSAIT       = as.numeric(sub(",", ".", G1NETSAIT)),
+  TAX_AMOUNT      = as.numeric(sub(",", ".", TAX_AMOUNT)),
+  COST            = as.numeric(sub(",", ".", COST)),
+  KZWI2           = as.numeric(sub(",", ".", KZWI2)))]
+
+# Set Key figures to 0 if NA
+dtDATA <- dtDATA[, `:=`(
+  QUANTITY        = ifelse(is.na(QUANTITY)       , 0, QUANTITY),
+  G1NETSAIT       = ifelse(is.na(G1NETSAIT)      , 0, G1NETSAIT),
+  TAX_AMOUNT      = ifelse(is.na(TAX_AMOUNT)     , 0, TAX_AMOUNT),
+  COST            = ifelse(is.na(COST)           , 0, COST),
+  KZWI2           = ifelse(is.na(KZWI2)          , 0, KZWI2))]
+
+```
+
+### Data Source
+
+```{r LegacyStoreToSAP, echo=FALSE, results=fRESULTS}
+# add the iSynergy Store next to the legacy store
+# timing: 18 sec.
+setnames(dtADRC, "ADDRNUMBER", "ADRNR")
+
+dtWERKS  <- merge(dtT001W[ , .(ADRNR, WERKS, VKORG, VTWEG, VLFKZ)], 
+                  dtADRC[  , .(ADRNR, SORT2)],
+                  all.x = TRUE, by = "ADRNR")
+
+# Select only UK stores
+dtWERKS  <- dtWERKS[substr(VKORG, 1, 2) %in% c("GB", "IE")]
+
+# Remove stores which are not Mapped
+dtTMP01  <- dtWERKS[is.na(SORT2)]
+dtWERKS  <- dtWERKS[!is.na(SORT2)] 
+
+# Quality check on Duplicates
+dtWERKS  <- dtWERKS[, DUP:= duplicated(dtWERKS, by = "SORT2")]
+dtWERKS  <- dtWERKS[, DUP:= any(DUP)          , by = "SORT2" ]
+
+dtTMP02  <- dtWERKS[DUP == TRUE][, DUP:=NULL]
+dtWERKS  <- dtWERKS[DUP == FALSE, .(WERKS, VKORG, SORT2)]
+
+setnames(dtWERKS, 
+         c("WERKS"),
+         c("PLANT"))
+
+dtSDP_01  <- dtSDP_VE[, SORT2:= substr(WERKS, 2,4)]
+dtWERKS   <- merge(dtWERKS, 
+                   dtSDP_01, 
+                   all.y = TRUE, by = "SORT2" )
+dtWERKS   <- dtWERKS[, .(SORT2, WERKS, SALESORG, DISTR_CHAN, PLANT)]
+
+# Quality check on Duplicates
+dtWERKS  <- dtWERKS[, DUP:= duplicated(dtWERKS, by = "SORT2")]
+dtWERKS  <- dtWERKS[, DUP:= any(DUP)          , by = "SORT2" ]
+
+dtWERKS <- dtWERKS[WERKS %in% unique(dtDATA$G1LGSTNO), 
+                   .(PLANT, SALESORG, DISTR_CHAN, WERKS)]
+# setnames(dtT001WN, "SORGSAP", "SalORGSAP")
+# dtORG     <- dtT001WN[, .N, by=.(VKORG.x, VKORG.y)]
+# 
+# dtORG     <- dtORG[substr(VKORG.y, 1, 1) %in% c("J", "R") & is.na(VKORG.x), 
+#                    VKORG.x:= "GB13"]
+# dtORG     <- dtORG[substr(VKORG.y, 1, 3) %in% c("VEI") & is.na(VKORG.x), 
+#                    VKORG.x:= "IE11"]
+# dtORG     <- dtORG[is.na(VKORG.x), VKORG.x:= "GB13"]
+# 
+# dtORG     <- dtORG[, sum(N), by=c("VKORG.x", "VKORG.y")]
+# dtORG     <- dtORG[!(VKORG.y == "VEIE" & VKORG.x == "GB13")] 
+# 
+# dtT001WN  <- merge(dtT001WN, dtORG, all.x = TRUE, by = "VKORG.y" ) 
+
+# Mapping 
+dtDATA  <- dtDATA[ , WERKS:= G1LGSTNO]
+dtDATA  <- merge(dtWERKS[, .(PLANT, SALESORG, DISTR_CHAN, WERKS)], 
+                dtDATA, 
+                all.y = TRUE, by = "WERKS")
+dtDATA <- dtDATA[, WERKS:= NULL]
+
+```
+
+## Store Mapping
+
+Following Stores could not be mapped and are removed from the store Master Data:
+
+```{r Non-Mapped_Stores, echo=fECHO, eval=fEVAL, results=fRESULTS}
+rbind(
+  dtTMP01, 
+  dtTMP02)
+```
+
+### Legacy & SAP Site
+
+The legacy site in the hsitorical data is named LWRKS. 
+The related SAP Site (WERKS) is joined based upon the last SORT2 field.
+Note that the last 3 characters are used from teh legacy site as teh SORT2 field
+doesnt have the J, V and I anymore.
+
+Át the same time the iSynergy Sales organization and the distribution channel is
+added to the transactional data. This can be used for connecting the Sales Organization 
+specific article master data (0MAT_SALES coming from MVKE)
+
+
+result: `r str(dtDATA)`
+
+### Legacy & SAP Article
+
+Next the related SAP article will be added to teh historical data if exisitng.
+For this the mapping table MEAN is used from client 250 for EANTP = Z2. 
+In case no SAp article exist the field will be empty. 
+
+```{r LegacyArticleToSAP, echo=fECHO, eval=fEVAL, results=fRESULTS }
+dtMAP <- copy(dtMEAN)
+dtMAP <- dtMEAN[MEINH == "ST" & 
+                EANTP == "Z2" &
+                EAN11 != "DUPLICATE", 
+                .(MATNR, EAN11, EANTP)]
+setnames(dtMAP, 
+         c("EANTP"     , "MATNR"   , "EAN11"  ), 
+         c("EAN_NUMTYP", "MATERIAL", "G1LGART"))
+
+# add EAN as CHAR 18
+dtMAP <- dtMAP[, `:=`(G1LGART = sprintf("%018d", as.integer(G1LGART)))]
+dtMAP <- dtMAP[G1LGART != "                NA"]
+
+# add the iSynergy Article next to the legacy article
+# timing: 18sec
+system.time(
+  dtDATA <- merge(dtMAP, 
+                  dtDATA, 
+                  by="G1LGART", all.y=TRUE ))
+dtDATA <- dtDATA[is.na(MATERIAL), MATERIAL:= NA]
+
+```
+
+before aggregation to DSO key: `r nrow(dtDATA)`
+
+```{r AggregateToKEY, echo=fECHO, eval=fEVAL, results=fRESULTS}
+dtDATA <- dtDATA[, .(QUANTITY   = sum(QUANTITY), 
+                     G1NETSAIT  = sum(G1NETSAIT),
+                     KZWI2      = sum(KZWI2),
+                     TAX_AMOUNT = sum(TAX_AMOUNT),
+                     COST       = sum(COST)),
+                 by = .(SALESORG  , DISTR_CHAN, PLANT    , G1LGSTNO,
+                        RPA_TTC   , RPA_PAI   , G1LGART  , MATERIAL, 
+                        CALDAY    ,  
+                        UNIT      , DOC_CURRCY)]
+```
+
+after aggregation to DSO key: `r nrow(dtDATA)`
+
+```{r  Calculations, echo=fECHO, eval=fEVAL, results=fRESULTS}
+
+dtDATA <- dtDATA[, `:=`(
+  STAT_CURR  = DOC_CURRCY           ,
+  CURRENCY   = DOC_CURRCY           ,
+  CURTYPE    =         "00"         ,    # Currency Type
+  SUBTOT_4S  =         COST         ,    # Subtotal 4
+  SUBTOT_5S  =         COST         ,    # Subtotal 5
+  G10SCCOGS  =         COST         ,    # Original SC COGS
+  G1NETCPIT  = (G1NETSAIT/QUANTITY) ,    # Net Cons Pr In Tax
+#  G1NETCPIT  = 0                    ,    # Net Cons Pr In Tax
+  G1DISCIT   = (G1NETSAIT - KZWI2)  ,    # Discount incl Tax
+  RPA_DRC    =           NA         ,    # Discount reason           
+  G1LINK     =           NA)]          # GVBNL lInk Field              
+
+# Remove Infinite Prices
+dtDATA <- dtDATA[is.infinite(G1NETCPIT) | is.nan(G1NETCPIT), 
+                 G1NETCPIT := 0]
+
+```
+
+final Result: `r str(dtDATA)`
+
+## Create Export File
+
+The resulting file is exported to .csv format using a , as list-separator.
+The file wil lhave 1 header row with the names, The decimal separator will be .
+
+```{r EXPORT, echo=fECHO, eval=fECHO, results=fRESULTS}
+dtDATA <- dtDATA[,
+                 .(SALESORG  , DISTR_CHAN, PLANT    , G1LGSTNO,
+                   RPA_TTC   , RPA_PAI   , G1LGART  , MATERIAL, 
+                   RPA_DRC   , G1LINK    , CALDAY   , QUANTITY,  
+                   UNIT      , CURTYPE   , G1NETCPIT, CURRENCY,
+                   TAX_AMOUNT, DOC_CURRCY, G1NETSAIT, G10SCCOGS,
+                   G1DISCIT  , SUBTOT_5S , COST     , SUBTOT_4S, 
+                   STAT_CURR )]
+
+dtDS <- dtRSDSSEGFD[DATASOURCE == "G1_DS_PA_HIST_FLAT_FILE" & OBJVERS == "A"]
+setkey(dtDS, "POSIT")
+
+dtDS <- dtDS[ , .(POSIT, FIELDNM, DATATYPE, DECIMALS, IOBJNM)]
+
+# fWriteToSheet(dtDATA, "VEUK", "POS", pAppend = FALSE )
+
+# ZFTP_FN_POS_HISTORY
+# usr/sap/BA1/FTP/POS/HISTORY/POS_HISTORY.csv
+l_months <- unique(substr(dtDATA$CALDAY, 1, 6))
+l_months <- sort(l_months)
+for (i in seq.int(1, 2, 2)){
+  x <- 0
+  if(i < length(l_months)){x <- 1}
+  
+  write.table(dtDATA[substr(dtDATA$CALDAY, 1, 6) %in% l_months[i:(i+x)]], 
+             file = file.path("c:", "FTP", 
+                              paste0("SALES_VEUK", "_", l_months[i], ".csv")),
+             quote = TRUE     , sep = ",", na = "", dec = ".",             
+             row.names = FALSE, col.names = TRUE, append = FALSE)
+}
+
+
+write.table(dtDATA[500000:1000000], 
+            file = file.path("c:", "FTP", "SALES_VEUK_small.csv"),
+            quote = TRUE     , sep = ",", na = "", dec = ".",           
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+
+# write.table(dtT001WN, 
+#             file = file.path("c:", "FTP", "T001W.csv"),
+#             quote = TRUE     , sep = ",", na = "", dec = ".",           
+#             row.names = FALSE, col.names = TRUE, append = FALSE)
+```
+
+# Result
+
+The structure below shows a part of the generated file
+
+```{r displayResult, echo=fECHO, eval=fEVAL, results='markup'}
+str(dtDATA)
+  
+head(dtDATA)
+
+sum(dtDATA$G1NETCPIT)
+```

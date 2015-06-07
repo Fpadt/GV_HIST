@@ -33,7 +33,7 @@ pLGCINDC  <- "H"
 
 # Data Settings
 pOPCO     <- "GVBNL"
-pROWS     <- 1000
+pROWS     <- -1L
 pSMALL    <- 1000
 pEXP      <- FALSE
 pPART     <- ""
@@ -268,6 +268,9 @@ dtWERKS  <- dtWERKS[DUP == FALSE][, DUP:=NULL]
 
 # Add the iSynergy Site to the Data Set based upon Legacy site  
 setnames(dtDATA, c("WERKS"), c("LWRKS"))
+dtWERKS <- dtWERKS[, LWRKS:= ifelse(nchar(dtWERKS$LWRKS) == 3, 
+                                    paste0("0", LWRKS),  
+                                    LWRKS)]
 
 # stores With Sales
 dtWERKS <- dtWERKS[LWRKS %in% unique(dtDATA$LWRKS)]
@@ -280,7 +283,7 @@ dtWERKS <- merge(data.table(LWRKS = unique(dtDATA$LWRKS)),
 # Introduce dummy stores for closed stores which are not in iSYnergy
 dtCWRKS <- dtWERKS[is.na(WERKS)]
 dtCWRKS <- dtCWRKS[, WERKS:= paste0(pLGCINDC, 
-                                    str_pad(1:nrow(dtCWRKS), 3, pad ="0"))]
+                                    str_pad(100:(100+nrow(dtCWRKS)), 3, pad ="0"))]
 
 dtWERKS <- rbind(dtWERKS[!is.na(WERKS)],
                  dtCWRKS)

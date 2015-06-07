@@ -17,7 +17,7 @@ output:
 
 ```{r RSetup, echo=FALSE, eval=TRUE, cache=FALSE, results='hide'}
 
-source('~/RW/QAR/00_RProj/00_Global/iSynGeneral.R')
+source('../QAR/00_RProj/00_Global/iSynGeneral.R')
 
 # Data Settings
 fECHO    <- FALSE
@@ -40,7 +40,8 @@ pPART     <- ""
 pFILE     <- paste(  pOPCO             , pBI_SYST,      pPART, sep="_") 
 pSRCF     <- paste0("GVBNL"       , "_", pBI_SYST, "_", pPART, ".csv")
 pEXPORT   <- paste0("POS_HISTORY", "_" , pBI_SYST, "_", pPART, ".csv") 
-pPath     <- "C:/Users/fpadt/Documents/RW/GV_HIST/60_Results" 
+pPath     <- "./60_Results"  
+pXLSX     <- paste0(pOPCO, "_SALES") 
 
 # Open Excel for storing results
 if(file.exists(paste0(pPath, "/", pOPCO, ".xlsx")) == TRUE){
@@ -153,10 +154,10 @@ Records: `r nrow(dtDATA)`
 ## Source Data 
 
 ```{r PrepareDataSet, echo=fECHO, eval=fEVAL, results=fRESULTS}
-dtTMP04 <- dtDATA[LMTNR == " "] # MATNR == "A9990002" |
+dtTMP04 <- dtDATA[LMTNR == " "] 
 if(nrow(dtTMP04) > 0){
   fWriteToSheet(dtTMP04, pFILE, "Records_DEL", pAppend = TRUE)
-  dtDATA <- dtDATA[LMTNR != " "] # MATNR != "A9990002" & 
+  dtDATA <- dtDATA[LMTNR != " "] 
   }
 
 # remove leading zero's
@@ -177,7 +178,8 @@ head(dtDATA[, c(8 :ncol(dtDATA)) , with = FALSE])
 # head(dtDATA[, c(24:ncol(dtDATA)) , with = FALSE])
 
 # fWriteToSheet(as.data.frame(str(dtDATA)), pFILE, "Structure", pAppend = TRUE)
-fWriteToSheet(head(dtDATA[1:10])        , pFILE, "tDATA"   , pAppend = TRUE)
+fWriteToSheet(head(dtDATA[1:10]), 
+               pPath, pXLSX, "DATA"   , pAppend = TRUE)
 ```
 
 ```{r ChangeDataTypes, echo=fECHO, eval=fEVAL, results=fRESULTS}
@@ -229,15 +231,14 @@ setnames(dtADRC, "ADDRNUMBER", "ADRNR")
 dtWERKS  <- merge(dtT001W[ , .(ADRNR, WERKS, VKORG, VTWEG, VLFKZ)], 
                   dtADRC[  , .(ADRNR, SORT2)],
                   all.x = TRUE, by = "ADRNR")
-rm(dtT001W, dtADRC)
-gc()
 
 # Select only NL stores
 dtWERKS  <- dtWERKS[substr(VKORG, 1, 2) %in% c("NL", "BE")]
 
 # Remove stores which are not Mapped
 dtTMP01  <- dtWERKS[ is.na(SORT2)][, SORT2:= NULL]
-fWriteToSheet(dtTMP01, pFILE, "WERKS_NO_SORT2", pAppend = TRUE )
+fWriteToSheet(dtTMP01, 
+              pPath, pXLSX, "WERKS_NO_SORT2", pAppend = TRUE )
 
 dtWERKS  <- dtWERKS[!is.na(SORT2)] 
 
@@ -258,9 +259,10 @@ dtWERKS  <- dtWERKS[, DUP:= duplicated(dtWERKS, by = "LWRKS")]
 dtTMP02  <- copy(dtWERKS)
 dtTMP02  <- dtTMP02[, DUP:= any(DUP)          , by = "LWRKS" ]
 dtTMP02  <- dtTMP02[DUP == TRUE ]
-fWriteToSheet(dtTMP02, pFILE, "WERKS_DUP", pAppend = TRUE )
+fWriteToSheet(dtTMP02, 
+              pPath, pXLSX, "WERKS_DUP", pAppend = TRUE )
 fWriteToSheet(dtWERKS[DUP == TRUE], 
-              pFILE, "LWRKS_DEL", pAppend = TRUE )
+              pPath, pXLSX,, "LWRKS_DEL", pAppend = TRUE )
 
 dtWERKS  <- dtWERKS[DUP == FALSE][, DUP:=NULL]
 
@@ -270,12 +272,18 @@ setnames(dtDATA, c("WERKS"), c("LWRKS"))
 # stores With Sales
 dtWERKS <- dtWERKS[LWRKS %in% unique(dtDATA$LWRKS)]
 
+dtWERKS <- merge(data.table(LWRKS = unique(dtDATA$LWRKS)),
+                 dtWERKS[, .(LWRKS, WERKS)],
+                 all.x = TRUE, by = "LWRKS")
+
 # Introduce dummy stores for closed stores which are not in iSYnergy
-l_WERKS <- nrow(dtWERKS[is.na(WERKS)])
-dtWERKS <- dtWERKS[, WERKS:= ifelse(is.na(WERKS),
-                                    paste0(pLGCINDC, 
-                                    str_pad(1:l_WERKS, 3, pad ="0")),
-                                    WERKS)]
+# Introduce dummy stores for closed stores which are not in iSYnergy
+dtCWRKS <- dtWERKS[is.na(WERKS)]
+dtCWRKS <- dtCWRKS[, WERKS:= paste0(pLGCINDC, 
+                                    str_pad(1:nrow(dtCWRKS), 3, pad ="0"))]
+
+dtWERKS <- rbind(dtWERKS[!is.na(WERKS)],
+                 dtCWRKS)
 
 dtDATA  <- merge(dtWERKS, dtDATA, 
                  all.y = TRUE, by = "LWRKS")

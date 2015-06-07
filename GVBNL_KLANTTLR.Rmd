@@ -17,7 +17,7 @@ output:
 
 ```{r RSetup, echo=FALSE, eval=TRUE, cache=FALSE, results='hide'}
 
-source('~/RW/QAR/00_RProj/00_Global/iSynGeneral.R')
+source('../QAR/00_RProj/00_Global/iSynGeneral.R')
 
 # Data Settings
 fECHO    <- FALSE
@@ -40,7 +40,7 @@ pPART     <- ""
 pFILE     <- paste(  pOPCO, "_KLNTTLR" , pBI_SYST,      pPART, sep="_") 
 pSRCF     <- paste0("GVBNL"       , "_", pBI_SYST, "_", pPART, ".csv")
 pEXPORT   <- paste0("POS_HISTORY", "_",  pBI_SYST, "_", pPART, ".csv") 
-pPath     <- "C:/Users/fpadt/Documents/RW/GV_HIST/60_Results" 
+pPath     <- "./60_Results" 
 pXLSX     <- paste0(pOPCO, "_KLNTTLR") 
 
 # Open Excel for storing results
@@ -72,10 +72,10 @@ dtDATA     <- fread(file.path(".", "RAW_DATA", "IDLKlantenteller.csv"),
 
 setnames(
   dtDATA,
-  c("store", "datum", "tijd" ,
-    "in1"  , "uit1" , "in2"  , "uit2"),
-  c("LWRKS", "CALDAY", "HOUR" , 
-    "IN1"  , "OUT1" , "IN2"  , "OUT2"))
+  c("store", "datum", "tijd"  ,
+    "in1"  , "uit1" , "in2"   , "uit2"),
+  c("LWRKS", "CALDAY", "REGHR", 
+    "IN1"  , "OUT1" , "IN2"   , "OUT2"))
 
 
 ```
@@ -107,12 +107,13 @@ fWriteToSheet(head(dtDATA[1:10]), pPath, pXLSX, "DATA"   , pAppend = TRUE)
 # Change data Types and set NA to 0
 system.time(
   dtDATA <- dtDATA[, `:=`(
-    LWRKS    = str_pad(LWRKS, 3, pad ="0"),
-    HOUR     = paste(HOUR, "00", sep=":"),
-    IN1      = as.integer(IN1),
-    OUT1     = as.integer(OUT1),
-    IN2      = as.integer(IN2),
-    OUT2     = as.integer(OUT2)) ])
+    RECORDMODE = "N",
+    LWRKS      = str_pad(LWRKS, 3, pad ="0"),
+    REGHR       = paste0(gsub(pattern = ":", replacement = "", REGHR), "00"),
+    IN1        = as.integer(IN1),
+    OUT1       = as.integer(OUT1),
+    IN2        = as.integer(IN2),
+    OUT2       = as.integer(OUT2)) ])
 
 gc()
 ```
@@ -130,8 +131,10 @@ dtWERKS  <- dtWERKS[substr(VKORG, 1, 2) %in% c("NL", "BE")]
 
 # Remove stores which are not Mapped
 dtTMP01  <- dtWERKS[ is.na(SORT2)][, SORT2:= NULL]
-fWriteToSheet(dtTMP01, 
-              pPath, pXLSX,  "WERKS_NO_SORT2", pAppend = TRUE )
+
+if(nrow(dtTMP01) > 0){
+  fWriteToSheet(dtTMP01, 
+                pPath, pXLSX,  "WERKS_NO_SORT2", pAppend = TRUE )}
 
 dtWERKS  <- dtWERKS[!is.na(SORT2)] 
 
@@ -143,10 +146,13 @@ dtWERKS  <- dtWERKS[, DUP:= duplicated(dtWERKS, by = "LWRKS")]
 dtTMP02  <- copy(dtWERKS)
 dtTMP02  <- dtTMP02[, DUP:= any(DUP)          , by = "LWRKS" ]
 dtTMP02  <- dtTMP02[DUP == TRUE ]
-fWriteToSheet(dtTMP02, 
-              pPath, pXLSX, "WERKS_DUP", pAppend = TRUE )
-fWriteToSheet(dtWERKS[DUP == TRUE], 
-              pPath, pXLSX, "LWRKS_DEL", pAppend = TRUE )
+
+if(nrow(dtTMP02) > 0){
+  fWriteToSheet(dtTMP02, 
+                pPath, pXLSX, "WERKS_DUP", pAppend = TRUE )
+  fWriteToSheet(dtWERKS[DUP == TRUE], 
+                pPath, pXLSX, "LWRKS_DEL", pAppend = TRUE )
+  }
 
 dtWERKS  <- dtWERKS[DUP == FALSE][, DUP:=NULL]
 
@@ -154,17 +160,16 @@ dtWERKS  <- dtWERKS[DUP == FALSE][, DUP:=NULL]
 dtWERKS <- dtWERKS[LWRKS %in% unique(dtDATA$LWRKS)]
 
 dtWERKS <- merge(data.table(LWRKS = unique(dtDATA$LWRKS)),
-                 dtWERKS,
+                 dtWERKS[, .(LWRKS, WERKS)],
                  all.x = TRUE, by = "LWRKS")
 
 # Introduce dummy stores for closed stores which are not in iSYnergy
-l_WERKS <- nrow(dtWERKS[is.na(WERKS)])
-dtWERKS <- dtWERKS[, WERKS:= ifelse(is.na(WERKS),
-                                    paste0(pLGCINDC, 
-                                    str_pad(1:l_WERKS, 3, pad ="0")),
-                                    WERKS)]
+dtCWRKS <- dtWERKS[is.na(WERKS)]
+dtCWRKS <- dtCWRKS[, WERKS:= paste0(pLGCINDC, 
+                                    str_pad(1:nrow(dtCWRKS), 3, pad ="0"))]
 
-
+dtWERKS <- rbind(dtWERKS[!is.na(WERKS)],
+                 dtCWRKS)
 
 dtDATA  <- merge(dtWERKS[, .(LWRKS, WERKS)], 
                  dtDATA, 
@@ -182,14 +187,18 @@ dtDATA  <- merge(dtWERKS[, .(LWRKS, WERKS)],
 
 
 dtDATA <- dtDATA[,
-                 .(LWERKS, WERKS, CALDAY, HOUR,
-                   IN1   , OUT1 , IN2   , OUT2 )]
+                 .(RECORDMODE, WERKS, CALDAY, REGHR,
+                   IN1       , OUT1 , IN2   , OUT2 )]
 
-# write.table(dtDATA, file = file.path("c:", "FTP", "GVBNL_KLNTTLR.csv"),
-#             quote = TRUE     , sep = ",", na = "", dec = ".",             
-#             row.names = FALSE, col.names = TRUE, append = FALSE)
+write.table(dtDATA, file = file.path("c:", "FTP", "GVBNL_KLNTTLR.csv"),
+            quote = TRUE     , sep = ";", na = "", dec = ".",             
+            row.names = FALSE, col.names = TRUE, append = FALSE)
 
 write.table(dtWERKS, file = file.path(".", "RAW_DATA", "GVBNL_WERKS.csv"),
-            quote = TRUE     , sep = ",", na = "", dec = ".",             
+            quote = TRUE     , sep = ";", na = "", dec = ".",             
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+
+write.table(dtCWRKS, file = file.path(".", "RAW_DATA", "GVBNL_CWRKS.csv"),
+            quote = TRUE     , sep = ";", na = "", dec = ".",             
             row.names = FALSE, col.names = TRUE, append = FALSE)
 ```

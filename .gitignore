@@ -1,9 +1,10 @@
-.Rproj
+.Rproj.user
+*.Rproj
 .Rhistory
-.RData
-.xlsx
-.pdf
-.docx
+*.RData
+*.xlsx
+*.pdf
+*.docx
 /60_Results/
 /Pictures/
 /RAW_DATA/

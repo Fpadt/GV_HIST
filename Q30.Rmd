@@ -57,33 +57,41 @@ fWriteToSheet(data.frame(ECCSYST = pECC_SYST,
 ```
 
 ```{r SplitVBRP, echo=FALSE, eval=FALSE, results='hide'}
-# dtVBRP <- fread(file.path(".", "RAW_DATA", "VBRP_GOLALL.txt"), 
-#                 sep=";", nrows = pROWS)
-# setkey(dtVBRP, "VBELN")
-# 
-# l_months <- sort(unique(substr(dtVBRP$FBUDA, 1, 6)))
-# 
-# write.table(dtVBRP[substr(dtVBRP$FBUDA, 1, 6) %in% l_months[1:6]], 
-#             file = file.path("c:", "FTP", 
-#                              paste0("VBRP, "_", 
-#                                     pBI_SYST, "_", "2014H1", ".csv")),
-#             quote = TRUE     , sep = ";", na = "", dec = ".",           
-#             row.names = FALSE, col.names = TRUE, append = FALSE)
-# 
-# write.table(dtVBRP[substr(dtVBRP$FBUDA, 1, 6) %in% l_months[7:12]], 
-#             file = file.path("c:", "FTP", 
-#                              paste0("VBRP, "_", 
-#                                     pBI_SYST, "_", "2014H2", ".csv")),
-#             quote = TRUE     , sep = ";", na = "", dec = ".",           
-#             row.names = FALSE, col.names = TRUE, append = FALSE)
-# 
-# write.table(dtVBRP[substr(dtVBRP$FBUDA, 1, 6) %in% l_months[13:17]], 
-#             file = file.path("c:", "FTP", 
-#                              paste0("VBRP, "_", 
-#                                     pBI_SYST, "_", "2015H2", ".csv")),
-#             quote = TRUE     , sep = ";", na = "", dec = ".",           
-#             row.names = FALSE, col.names = TRUE, append = FALSE)
-# rm(list=ls())
+dtVBRP <- fread(file.path(".", "RAW_DATA", "VBRP_TRX_Q30.txt"), 
+                sep=";", nrows = pROWS)
+setkey(dtVBRP, "VBELN")
+
+dtVBRPL <- fread(file.path(".", "RAW_DATA", "VBRP_TRX_L30.txt"), 
+                sep=";", nrows = pROWS)
+setkey(dtVBRP, "VBELN")
+
+dtVBRP <- rbind(dtVBRP, dtVBRPL)
+rm(dtVBRPL)
+
+l_months <- sort(unique(substr(dtVBRP$FBUDA, 1, 6)))
+
+write.table(dtVBRP[substr(dtVBRP$FBUDA, 1, 6) %in% l_months[1:6]], 
+            file = file.path("c:", "FTP", 
+                             paste0("VBRP", "_", 
+                                    pBI_SYST, "_", "2014H1", ".csv")), 
+            quote = TRUE     , sep = ";", na = "", 
+            dec = ".", 
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+
+write.table(dtVBRP[substr(dtVBRP$FBUDA, 1, 6) %in% l_months[7:12]], 
+            file = file.path("c:", "FTP", 
+                             paste0("VBRP", "_", 
+                                    pBI_SYST, "_", "2014H2", ".csv")),
+            quote = TRUE     , sep = ";", na = "", dec = ".",           
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+
+write.table(dtVBRP[substr(dtVBRP$FBUDA, 1, 6) %in% l_months[13:18]], 
+            file = file.path("c:", "FTP", 
+                             paste0("VBRP", "_", 
+                                    pBI_SYST, "_", "2015H2", ".csv")),
+            quote = TRUE     , sep = ";", na = "", dec = ".",           
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+rm(list=ls())
 ```
 
 
@@ -234,13 +242,10 @@ dtWERKS  <- dtWERKS[substr(VKORG, 1, 2) %in% c("GB", "IE")]
 
 # Remove stores which are not Mapped
 dtTMP01  <- dtWERKS[ is.na(SORT2)][, SORT2:= NULL]
+fWriteToSheet(dtTMP01, 
+              pPath, pXLSX, "WERKS_NO_SORT2", pAppend = TRUE )
 
-if(nrow(dtTMP01) > 0){
-  fWriteToSheet(dtTMP01, 
-                pPath, pXLSX, "WERKS_NO_SORT2", pAppend = TRUE )
-  
-  dtWERKS  <- dtWERKS[!is.na(SORT2)] 
-  }
+dtWERKS  <- dtWERKS[!is.na(SORT2)] 
 
 # Add Sales Org from list which include the closed Stores
 dtSDP_01  <- dtSDP_VE[, SORT2:= substr(WERKS, 2,4)]
@@ -253,10 +258,10 @@ dtWERKS   <- merge(dtWERKS,
 dtWERKS   <- dtWERKS[, .(WERKS, LWRKS, SALESORG, DISTR_CHAN)]
 
 # Quality check on Duplicates
-dtWERKS  <- dtWERKS[, DUP:= duplicated(dtWERKS, by = "LWRKS")]
+dtWERKS  <- dtWERKS[, DUP:= duplicated(dtWERKS, by = "SORT2")]
 
 dtTMP02  <- copy(dtWERKS)
-dtTMP02  <- dtTMP02[, DUP:= any(DUP)          , by = "LWRKS" ]
+dtTMP02  <- dtTMP02[, DUP:= any(DUP)          , by = "SORT2" ]
 dtTMP02  <- dtTMP02[DUP == TRUE ]
 fWriteToSheet(dtTMP02, pFILE, "WERKS_DUP", pAppend = TRUE )
 fWriteToSheet(dtWERKS[DUP == TRUE], 
@@ -282,8 +287,10 @@ dtWERKS <- dtWERKS[, WERKS:= ifelse(is.na(WERKS),
                                     str_pad(1:l_WERKS, 3, pad ="0")),
                                     WERKS)]
 
+dtDATA  <- dtDATA[, SORT2:= substr(LWRKS, 2, 4) ] 
 dtDATA  <- merge(dtWERKS, dtDATA, 
-                 all.y = TRUE, by = "LWRKS")
+                 all.y = TRUE, by = "SORT2")
+
 dtDATA  <- dtDATA[, `:=`(VKORG      = SALESORG, 
                          VTWEG      = DISTR_CHAN,
                          SALESORG   = NULL,

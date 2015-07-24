@@ -45,8 +45,9 @@ pXLSX     <- paste0(pOPCO, "_SALES")
 
 # Open Excel for storing results
 if(file.exists(paste0(pPath, "/", pOPCO, ".xlsx")) == TRUE){
-  file.remove(paste0(pPath, "/", pOPCO, ".xlsx"))
+   file.remove(paste0(pPath, "/", pOPCO, ".xlsx"))
 }
+
 fWriteToSheet(data.frame(ECCSYST = pECC_SYST, 
                          ECCCLNT = pECC_CLNT,
                          BI_SYST = pBI_SYST ,
@@ -101,11 +102,15 @@ dtMEAN       <- fGetTable(pTable = "MEAN", pKey = c("MATNR", "MEINH"),
                           pSystID = pECC_SYST, pClient = pECC_CLNT)
 dtMEAN       <- dtMEAN[, MATNR:= as.character(MATNR)]
 
-dtADRC      <- fGetTable(pTable = "ADRC", 
-                         pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtADRC       <- fGetTable(pTable = "ADRC", 
+                          pSystID = pECC_SYST, pClient = pECC_CLNT)
 
-dtT001W     <- fGetTable(pTable = "T001W", pKey = c("WERKS"),
-                         pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtT001W      <- fGetTable(pTable = "T001W", pKey = c("WERKS"),
+                          pSystID = pECC_SYST, pClient = pECC_CLNT)
+
+dtPLANT      <- fGetTable(pTable = "/BI0/PPLANT",
+                          pKey = "PLANT",
+                          pSystID = pBI_SYST, pClient = pBI_CLNT)
 
 dtRSDSSEGFD  <- fGetTable(pTable = "RSDSSEGFD", 
                           pKey = c("DATASOURCE", "POSIT"),
@@ -117,9 +122,7 @@ dtRSDSSEGFDT <- fGetTable(pTable = "RSDSSEGFDT",
                           pSystID = pBI_SYST, pClient = pBI_CLNT)
 dtRSDSSEGFDT <- dtRSDSSEGFDT[DATASOURCE == "G0_DS_LEGACY_SLS_TD" ]
 
-dtPLANT      <- fGetTable(pTable = "/BI0/PPLANT",
-                          pKey = "PLANT",
-                          pSystID = pBI_SYST, pClient = pBI_CLNT)
+
 
 dtSDP_BLX    <- fread(file.path(".", "RAW_DATA", "SDP_BLX.csv"), 
                       sep=";")

@@ -35,24 +35,24 @@ pLGCINDC  <- "H"
 pOPCO     <- "VEUK"
 pROWS     <- -1L
 pSMALL    <- 1000
-pEXP      <- TRUE
+pEXP      <- FALSE
 pPART     <- "2014H1"
-pFILE     <- paste(  pOPCO       ,      pBI_SYST,      pPART, sep="_") 
-pSRCF     <- paste0("VBRP"       , "_", pBI_SYST, "_", pPART, ".csv")
-pEXPORT   <- paste0("POS_HISTORY", "_", pBI_SYST, "_", pPART, ".csv") 
+pFILE     <- paste(  pOPCO        ,      pBI_SYST,      pPART, sep="_") 
+pSRCF     <- paste0("VBRP"        , "_", pBI_SYST, "_", pPART, ".csv")
+pEXPORT   <- paste0("POS_HISTORY" , "_", pBI_SYST, "_", pPART, ".csv") 
 pPath     <- "./60_Results"  
-pXLSX     <- paste0(pOPCO, "_KLNTTLR") 
+pXLSX     <- paste0(pOPCO, "_SALES") 
 
 # Open Excel for storing results
-if(file.exists(paste0(pPath, "/", pXLSX, ".xlsx")) == TRUE){
-   file.remove(paste0(pPath, "/", pXLSX, ".xlsx"))
+if(file.exists(paste0(pPath, "/", pOPCO, ".xlsx")) == TRUE){
+   file.remove(paste0(pPath, "/", pOPCO, ".xlsx"))
 }
 
 fWriteToSheet(data.frame(ECCSYST = pECC_SYST, 
                          ECCCLNT = pECC_CLNT,
                          BI_SYST = pBI_SYST ,
                          BI_CLNT = pBI_CLNT), 
-              pPath, pXLSX, "PARAM"   , pAppend = FALSE )
+              pPath, pOPCO, "PARAM"   , pAppend = FALSE )
 
 ```
 
@@ -95,6 +95,7 @@ rm(list=ls())
 ```
 
 
+
 ```{r ReadRawData, echo=fECHO, eval=fEVAL, results=fRESULTS}
 
 dtMEAN       <- fGetTable(pTable = "MEAN", pKey = c("MATNR", "MEINH"),
@@ -133,9 +134,9 @@ dtSDP_VE    <- fread(file.path(".", "RAW_DATA", "SDP_VE.csv"),
                 sep=";")
 setkey(dtSDP_VE, "WERKS")
 
-dtMARA      <- fread(file.path(".", "RAW_DATA", "MARA.csv"), 
-                sep=";")
-setkey(dtMARA, "MATNR")
+# dtMARA      <- fread(file.path(".", "RAW_DATA", "MARA.csv"), 
+#                 sep=";")
+# setkey(dtMARA, "MATNR")
 
 ```
 
@@ -178,11 +179,10 @@ Records: `r nrow(dtVBRP)`
 
 dtTMP04 <- dtVBRP[MATNR == " "] # MATNR == "A9990002" |
 
-if(nrow(dtTMP04) > 0){
-  fWriteToSheet(dtTMP04, 
-                pPath, pXLSX, "Records_DEL", pAppend = TRUE)
-  dtVBRP <- dtVBRP[MATNR != " "] # MATNR != "A9990002" & 
-  }
+WriteToSheet(dtTMP04, 
+             pPath, pXLSX, "Records_DEL", pAppend = TRUE)
+dtVBRP <- dtVBRP[MATNR != " "] # MATNR != "A9990002" & 
+
 
 dtDATA <- merge(dtVBRK, dtVBRP, by = "VBELN")
 setkey(dtDATA, "VBELN")
@@ -212,17 +212,19 @@ fWriteToSheet(head(dtDATA[1:10]),
 # Change data Types and set NA to 0
 system.time(
   dtDATA <- dtDATA[, `:=`(
-    FKIMG = ifelse(is.na(FKIMG), 0, as.integer(FKIMG)),
-    FKLMG = ifelse(is.na(FKLMG), 0, as.integer(FKLMG)),
-    KZWI1 = ifelse(is.na(KZWI1), 0, as.numeric(sub(",", ".", KZWI1))),
-    KZWI2 = ifelse(is.na(KZWI2), 0, as.numeric(sub(",", ".", KZWI2))),
-    KZWI3 = ifelse(is.na(KZWI3), 0, as.numeric(sub(",", ".", KZWI3))),
-    KZWI4 = ifelse(is.na(KZWI4), 0, as.numeric(sub(",", ".", KZWI4))), 
-    KZWI5 = ifelse(is.na(KZWI5), 0, as.numeric(sub(",", ".", KZWI5))),
-    KZWI6 = ifelse(is.na(KZWI6), 0, as.numeric(sub(",", ".", KZWI6))),
-    NETWR = ifelse(is.na(NETWR), 0, as.numeric(sub(",", ".", NETWR))), 
-    MWSBP = ifelse(is.na(MWSBP), 0, as.numeric(sub(",", ".", MWSBP))), 
-    WAVWR = ifelse(is.na(WAVWR), 0, as.numeric(sub(",", ".", WAVWR))))])
+    VBELN     = paste0("H", str_pad(VBELN, 9, pad="0")),
+    RPA_DRC   = toupper(x = RPA_DRC),
+    FKIMG     = ifelse(is.na(FKIMG), 0, as.integer(FKIMG)),
+    FKLMG     = ifelse(is.na(FKLMG), 0, as.integer(FKLMG)),
+    KZWI1     = ifelse(is.na(KZWI1), 0, as.numeric(sub(",", ".", KZWI1))),
+    KZWI2     = ifelse(is.na(KZWI2), 0, as.numeric(sub(",", ".", KZWI2))),
+    KZWI3     = ifelse(is.na(KZWI3), 0, as.numeric(sub(",", ".", KZWI3))),
+    KZWI4     = ifelse(is.na(KZWI4), 0, as.numeric(sub(",", ".", KZWI4))), 
+    KZWI5     = ifelse(is.na(KZWI5), 0, as.numeric(sub(",", ".", KZWI5))),
+    KZWI6     = ifelse(is.na(KZWI6), 0, as.numeric(sub(",", ".", KZWI6))),
+    NETWR     = ifelse(is.na(NETWR), 0, as.numeric(sub(",", ".", NETWR))), 
+    MWSBP     = ifelse(is.na(MWSBP), 0, as.numeric(sub(",", ".", MWSBP))), 
+    WAVWR     = ifelse(is.na(WAVWR), 0, as.numeric(sub(",", ".", WAVWR))))])
 
 gc()
 ```

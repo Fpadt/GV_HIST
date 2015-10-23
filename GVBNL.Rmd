@@ -29,7 +29,7 @@ pECC_SYST <- "RA1"
 pECC_CLNT <- "250"
 pBI_SYST  <- "BA1" 
 pBI_CLNT  <- "200"
-pLGCINDC  <- "H"
+pLGCINDC  <- "C"
 
 # Data Settings
 pOPCO     <- "GVBNL"
@@ -129,7 +129,15 @@ dtSDP_BLX    <- fread(file.path(".", "RAW_DATA", "SDP_BLX.csv"),
 setkey(dtSDP_BLX, "WERKS")
 
 dtDATA     <- fread(file.path(".", "RAW_DATA", "GVBLX_HIST.txt"),  
-                     sep = ";", nrows = pROWS, colClasses="character") 
+                    sep = ";", nrows = pROWS, colClasses="character") 
+
+dtCL       <- fread(file.path(".", "RAW_DATA", "GVBLX_HIST_20150717.txt"), 
+                    sep=";", colClasses="character")
+
+dtGL       <- fread(file.path(".", "RAW_DATA", "ttSalesHist.prd.20150720.csv"), 
+                    sep=";", colClasses="character")
+dtGL <- dtGL[, ART:= gsub("\"", "", dtGL[1]$Art.nr.)]
+
 
 setnames(
   dtDATA,

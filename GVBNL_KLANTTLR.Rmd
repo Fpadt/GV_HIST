@@ -25,11 +25,11 @@ fEVAL    <- TRUE
 fRESULTS <- 'hide' 
 
 # SAP systems to use
-pECC_SYST <- "RA1"
-pECC_CLNT <- "250"
-pBI_SYST  <- "BA1" 
-pBI_CLNT  <- "200"
-pLGCINDC  <- "H"
+pECC_SYST <- "RP1"
+pECC_CLNT <- "300"
+pBI_SYST  <- "BP1" 
+pBI_CLNT  <- "300"
+pLGCINDC  <- "C"
 
 # Data Settings
 pOPCO     <- "GVBNL"
@@ -58,14 +58,14 @@ fWriteToSheet(data.frame(ECCSYST = pECC_SYST,
 
 ```{r ReadRawData, echo=fECHO, eval=fEVAL}
 
-dtADRC      <- fGetTable(pTable = "ADRC", 
-                         pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtADRC      <- fGetSAPTable(pTable = "ADRC", 
+                            pSystID = pECC_SYST, pClient = pECC_CLNT)
 
-dtT001W     <- fGetTable(pTable = "T001W", pKey = c("WERKS"),
-                         pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtT001W     <- fGetSAPTable(pTable = "T001W", pKey = c("WERKS"),
+                            pSystID = pECC_SYST, pClient = pECC_CLNT)
 
-dtRSDSSEGFD <- fGetTable(pTable = "RSDSSEGFD", 
-                         pSystID = pBI_SYST, pClient = pBI_CLNT)
+dtRSDSSEGFD <- fGetSAPTable(pTable = "RSDSSEGFD", 
+                            pSystID = pBI_SYST, pClient = pBI_CLNT)
 
 dtDATA     <- fread(file.path(".", "RAW_DATA", "IDLKlantenteller.csv"),  
                      sep = ";", nrows = -1L, colClasses="character") 
@@ -131,10 +131,8 @@ dtWERKS  <- dtWERKS[substr(VKORG, 1, 2) %in% c("NL", "BE")]
 
 # Remove stores which are not Mapped
 dtTMP01  <- dtWERKS[ is.na(SORT2)][, SORT2:= NULL]
-
-if(nrow(dtTMP01) > 0){
-  fWriteToSheet(dtTMP01, 
-                pPath, pXLSX,  "WERKS_NO_SORT2", pAppend = TRUE )}
+fWriteToSheet(dtTMP01, 
+              pPath, pXLSX, "WERKS_NO_SORT2", pAppend = TRUE )
 
 dtWERKS  <- dtWERKS[!is.na(SORT2)] 
 

@@ -1,0 +1,587 @@
+---
+title: "Legacy Sales - GrandVision Benelux - "
+author: "F.J.Padt"
+date: "`r Sys.Date()`"
+output: 
+   pdf_document:
+    toc:             true
+    toc_depth:       2
+    number_sections: true
+    fig_caption:     true
+    fig_crop:        true
+    highlight:       tango    
+---
+
+\newpage
+![Logo](http://www.grandvision.com/img/logoGV.png) 
+
+```{r RSetup, echo=FALSE, eval=TRUE, cache=FALSE, results='hide'}
+
+source('../QAR/00_RProj/00_Global/iSynGeneral.R')
+
+# Data Settings
+fECHO    <- FALSE
+fEVAL    <- TRUE
+fRESULTS <- 'hide' 
+
+# SAP systems to use
+pECC_SYST <- "RP1"
+pECC_CLNT <- "300"
+pBI_SYST  <- "BP1" 
+pBI_CLNT  <- "300"
+pLGCINDC  <- "H"
+
+# Data Settings
+pOPCO     <- "GVBNL"
+pROWS     <- -1L
+pSMALL    <- 1000
+pEXP      <- FALSE
+pPART     <- ""
+pFILE     <- paste(  pOPCO             , pBI_SYST,      pPART, sep="_") 
+pSRCF     <- paste0("GVBNL"       , "_", pBI_SYST, "_", pPART, ".csv")
+pEXPORT   <- paste0("POS_HISTORY", "_" , pBI_SYST, "_", pPART, ".csv") 
+pPath     <- "./60_Results"  
+pXLSX     <- paste0(pOPCO, "_SALES") 
+
+# Open Excel for storing results
+if(file.exists(paste0(pPath, "/", "POC", ".xlsx")) == TRUE){
+   file.remove(paste0(pPath, "/", "POC", ".xlsx"))
+}
+
+fWriteToSheet(data.frame(ECCSYST = pECC_SYST, 
+                         ECCCLNT = pECC_CLNT,
+                         BI_SYST = pBI_SYST ,
+                         BI_CLNT = pBI_CLNT), 
+              pPath, "POC", "PARAM"   , pAppend = FALSE )
+```
+
+```{r ReadRawData, echo=fECHO, eval=fEVAL, results=fRESULTS}
+
+dtMARA       <- fGetSAPTable(pTable = "MARA", 
+                             pKey = c("MATNR"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtMARA       <- dtMARA[, MATNR:= as.character(MATNR)]
+dtMARA       <- dtMARA[MTART == "Z007" & LVORM == "", 
+                       .(MATNR,     MATKL, 
+                         MSTAE,     MSTAV,     ZZCOLOR,  ZZGENDER, 
+                         ZZBRANDTP, ZZBRANDID, ZZMATGRP, ZZMATERIAL)]
+dtMARA       <- setnames(dtMARA, 
+                         c("ZZBRANDTP", "ZZCOLOR", "ZZGENDER", "ZZBRANDID",
+                           "ZZMATGRP", "ZZMATERIAL"), 
+                         c("BRANDTYP" , "COLOR"  , "GENDER"  , "BRAND",
+                           "MATGRP", "MATTYP")) 
+
+#### Material Text ####
+dtMAKT       <- fGetSAPTable(pTable = "MAKT", 
+                             pKey = c("MATNR"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtMAKT       <- dtMAKT[SPRAS == "E", .(MATNR, MAKTX)]
+dtMARA       <- merge(dtMARA, dtMAKT, by = "MATNR")
+rm(dtMAKT)
+
+### Material Class ####
+dtT023T      <- fGetSAPTable(pTable = "T023T", 
+                             pKey = c("MATKL"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtT023T      <- dtT023T[, .(MATKL, WGBEZ, WGBEZ60)]
+dtT023T      <- setnames(dtT023T, 
+                         c("MATKL", "WGBEZ"    , "WGBEZ60"),
+                         c("MATKL", "MATKL_TMD", "MATKL_TLG")) 
+
+dtMARA       <- merge(dtMARA, dtT023T, by = "MATKL")
+rm(dtT023T)
+
+### Cross-Site Article Status ####
+dtT141T      <- fGetSAPTable(pTable = "T141T", 
+                             pKey = c("MMSTA"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+setnames(dtT141T, "MMSTA", "MSTAE")
+dtT141T      <-  dtT141T[SPRAS == "E", .(MSTAE, MTSTB)]
+dtT141T      <- setnames(dtT141T, 
+                         c("MSTAE", "MTSTB"),
+                         c("MSTAE", "MSTAE_TSH")) 
+
+dtMARA       <- merge(dtMARA, dtT141T, 
+                      all.x = TRUE, by = "MSTAE")
+rm(dtT141T)
+
+### Cross-distribution-chain article status ####
+dtTVMST      <- fGetSAPTable(pTable = "TVMST", 
+                             pKey = c("VMSTA"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtTVMST      <- dtTVMST[SPRAS == "E", .(VMSTA, VMSTB)]
+dtTVMST      <- setnames(dtTVMST, 
+                         c("VMSTA", "VMSTB"), 
+                         c("MSTAV", "MSTAV_TSH"))
+
+dtMARA       <- merge(dtMARA, dtTVMST, 
+                      all.x = TRUE, by = "MSTAV")
+rm(dtTVMST)
+
+### ZZCOLOR ####
+dtCOLOR      <- fGetSAPTable(pTable = "ZMDAM_GV_COLOR", 
+                             pKey = c("ZZCOLOR"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtCOLOR      <- dtCOLOR[SPRAS == "E", .(ZZCOLOR, ZZCOLOR_DESC)]
+dtCOLOR      <- setnames(dtCOLOR, 
+                         c("ZZCOLOR", "ZZCOLOR_DESC"),
+                         c("COLOR"  , "COLOR_TLG"))
+
+dtMARA       <- merge(dtMARA, dtCOLOR, 
+                      all.x = TRUE, by = "COLOR")
+rm(dtCOLOR)
+
+### ZZGENDER ####
+dtGENDER     <- fGetSAPTable(pTable = "ZMDAM_GV_GENDER", 
+                             pKey = c("ZZGENDER"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtGENDER     <-  dtGENDER[SPRAS == "E", .(ZZGENDER, ZZGENDER_DESC)]
+dtGENDER      <- setnames(dtGENDER, 
+                         c("ZZGENDER", "ZZGENDER_DESC"),
+                         c("GENDER"  , "GENDER_TLG"))
+
+dtMARA       <- merge(dtMARA, dtGENDER, 
+                      all.x = TRUE, by = "GENDER")
+rm(dtGENDER)
+
+### ZZBRANDID ####
+dtBRANDID     <- fGetSAPTable(pTable = "ZMDAM_GV_BRANDL", 
+                             pKey = c("ZZBRANDID"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtBRANDID     <- dtBRANDID[SPRAS == "E", .(ZZBRANDID, ZZBRAND_DESC)]
+dtBRANDID     <- setnames(dtBRANDID, 
+                         c("ZZBRANDID", "ZZBRAND_DESC"),
+                         c("BRAND"    , "BRAND_TLG"))
+
+dtMARA       <- merge(dtMARA, dtBRANDID, 
+                      all.x = TRUE, by = "BRAND")
+rm(dtBRANDID)
+
+### ZZMATGRP ####
+dtMATGRP     <- fGetSAPTable(pTable = "ZMDAM_GV_MATGRP", 
+                             pKey = c("ZZMATGRP"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtMATGRP     <- dtMATGRP[SPRAS == "E", .(ZZMATGRP, ZZMATGRP_DESC)]
+dtMATGRP     <- setnames(dtMATGRP, 
+                         c("ZZMATGRP", "ZZMATGRP_DESC"),
+                         c("MATGRP"  , "MATGRP_TLG"))
+
+dtMARA       <- merge(dtMARA, dtMATGRP, 
+                      all.x = TRUE, by = "MATGRP")
+rm(dtMATGRP)
+
+### ZZMATERIAL ####
+dtMATERIAL     <- fGetSAPTable(pTable = "ZMDAM_GV_MATTP", 
+                             pKey = c("ZZMATERIAL"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtMATERIAL     <- dtMATERIAL[SPRAS == "E", .(ZZMATERIAL, ZZMATTP_DESC)]
+dtMATERIAL     <- setnames(dtMATERIAL, 
+                         c("ZZMATERIAL", "ZZMATTP_DESC"),
+                         c("MATTYP"  , "MATTYP_TLG"))
+
+dtMARA         <- merge(dtMARA, dtMATERIAL, 
+                        all.x = TRUE, by = "MATTYP")
+rm(dtMATERIAL)
+
+### 0MAT_SALES ####
+dtMVKE       <- fGetSAPTable(pTable = "MVKE", 
+                             pKey = c("MATNR", "VTWEG", "VKORG"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtMVKE       <- dtMVKE[, MATNR:= as.character(MATNR)]
+dtMVKE       <- dtMVKE[, .(MATNR, VKORG, VTWEG, VMSTA, PLGTP, ZZSTYLE, ZZTGTAGEGRP, ZZTGTGRP)] 
+dtMVKE       <- setnames(dtMVKE,
+                         c("PLGTP" , "ZZSTYLE", "ZZTGTAGEGRP", "ZZTGTGRP"),
+                         c("PRCBND", "STYLE"  , "TGTAGEGRP"  , "TGTGRP"))
+
+### ZZTGTGRP ####
+dtTGTGRP     <- fGetSAPTable(pTable = "ZMDAM_GV_TGTGRP", 
+                             pKey = c("ZZTGTGRP"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtTGTGRP     <- dtTGTGRP[SPRAS == "E", .(ZZTGTGRP, ZZTGTGRP_DES)]
+dtTGTGRP     <- setnames(dtTGTGRP, 
+                         c("ZZTGTGRP"  , "ZZTGTGRP_DES"),
+                         c("TGTGRP"    , "TGTGRP_TLG"))
+
+dtMVKE       <- merge(dtMVKE, dtTGTGRP, 
+                      all.x = TRUE, by = "TGTGRP")
+rm(dtTGTGRP)
+
+### ZZTGTAGEGRP ####
+dtTGTAGEGRP  <- fGetSAPTable(pTable = "ZMDAM_GV_TGTAGE", 
+                             pKey = c("ZZTGTAGEGRP"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtTGTAGEGRP  <- dtTGTAGEGRP[SPRAS == "E", .(ZZTGTAGEGRP, ZZTGTAGEGRP_DES)]
+dtTGTAGEGRP  <- setnames(dtTGTAGEGRP, 
+                         c("ZZTGTAGEGRP"  , "ZZTGTAGEGRP_DES"),
+                         c("TGTAGEGRP"    , "TGTAGEGRP_TLG"))
+
+dtMVKE       <- merge(dtMVKE, dtTGTAGEGRP, 
+                      all.x = TRUE, by = "TGTAGEGRP")
+rm(dtTGTAGEGRP)
+
+### ZZSTYLE ####
+dtSTYLE      <- fGetSAPTable(pTable = "ZMDAM_GV_ZZSTYLE", 
+                             pKey = c("ZZSTYLE"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtSTYLE      <- dtSTYLE[SPRAS == "E", .(ZZSTYLE, ZZSTYLE_DESC)]
+dtSTYLE      <- setnames(dtSTYLE, 
+                         c("ZZSTYLE"  , "ZZSTYLE_DESC"),
+                         c("STYLE"    , "STYLE_TLG"))
+
+
+dtMVKE       <- merge(dtMVKE, dtSTYLE, 
+                      all.x = TRUE, by = "STYLE")
+rm(dtSTYLE)
+
+### PriceBand ####
+dtTWPTT      <- fGetSAPTable(pTable = "TWPTT", 
+                             pKey = c("PLGTP"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtTWPTT      <- dtTWPTT[SPRAS == "E", .(PLGTP, VTEXT)]
+dtTWPTT      <- setnames(dtTWPTT, 
+                         c("PLGTP"   , "VTEXT"),
+                         c("PRCBND"  , "PRCBND_TLG"))
+
+dtMVKE       <- merge(dtMVKE, dtTWPTT, 
+                      all.x = TRUE, by = "PRCBND")
+rm(dtTWPTT)
+
+### Article Status ####
+dtTVMST      <- fGetSAPTable(pTable = "TVMST", 
+                             pKey = c("VMSTA"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtTVMST      <- dtTVMST[SPRAS == "E", .(VMSTA, VMSTB)]
+dtTVMST      <- setnames(dtTVMST, 
+                         c("VMSTA", "VMSTB"), 
+                         c("VMSTA", "VMSTA_TSH"))
+
+dtMVKE       <- merge(dtMVKE, dtTVMST, 
+                      all.x = TRUE, by = "VMSTA")
+
+### MATERIAL COMBINATION ####
+
+dtMEAN       <- fGetSAPTable(pTable = "MEAN", 
+                             pKey = c("MATNR", "MEINH"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtMEAN       <- dtMEAN[, MATNR:= as.character(MATNR)]
+dtMEAN       <- dtMEAN[EANTP %in% c("Z1", "Z2"), .(MATNR, EAN11, EANTP)] 
+
+dtMAT        <- merge(dtMARA, dtMEAN, by = "MATNR")
+dtMAT        <- merge(dtMAT , dtMVKE, by = "MATNR")
+
+rm(dtTVMST, dtMEAN, dtMVKE)
+
+dtMAT <- setcolorder(dtMAT, 
+                     c("MATNR"      , "MAKTX",
+                       "VKORG"      , "VTWEG"    ,
+                       "EAN11"      , "EANTP"     ,
+                       "MSTAE"      , "MSTAE_TSH" , 
+                       "MSTAV"      , "MSTAV_TSH" ,
+                       "VMSTA"      , "VMSTA_TSH" ,
+                       "MATKL"      , "MATKL_TMD" , "MATKL_TLG", 
+                       "MATTYP"     , "MATTYP_TLG",
+                       "MATGRP"     , "MATGRP_TLG",
+                       "BRAND"      , "BRAND_TLG" ,
+                       "BRANDTYP"   ,
+                       "GENDER"     , "GENDER_TLG", 
+                       "COLOR"      , "COLOR_TLG" ,
+                       "STYLE"      , "STYLE_TLG",
+                       "TGTAGEGRP"  , "TGTAGEGRP_TLG",
+                       "TGTGRP"     , "TGTGRP_TLG",
+                       "PRCBND"     , "PRCBND_TLG"))
+
+rm(dtMARA)
+```
+
+
+## Source Data 
+
+```{r PrepareDataSet, echo=fECHO, eval=fEVAL, results=fRESULTS}
+
+### VBRK Header - concatenate the Two files ####
+dtVBRK <- fread(file.path(".", "RAW_DATA", "VBRK_GOL.txt"), 
+                sep=";", nrows = pROWS)
+setkey(dtVBRK, "VBELN")
+dtVBRK <- dtVBRK[FKDAT < 20150401, ]
+
+dtKLST <- fread(file.path(".", "RAW_DATA", "VBRK_LST.txt"), 
+                sep=";", nrows = pROWS)
+setkey(dtKLST, "VBELN")
+
+dtVBRK <- rbind(dtVBRK, dtKLST)
+dtVBRK <- dtVBRK[, .(VBELN, FKDAT, FKART)]
+rm(dtKLST)
+
+### VBRP Item Concatenated ####
+dtVBRP <- fread(file.path(".", "RAW_DATA", "VBRP_TRX_Q30.txt"), 
+                sep=";", nrows = pROWS)
+setkey(dtVBRP, "VBELN")
+dtVBRP <- dtVBRP[FBUDA < 20150401, ]
+
+dtPLST <- fread(file.path(".", "RAW_DATA", "VBRP_TRX_L30.txt"), 
+                sep=";", nrows = pROWS)
+setkey(dtPLST, "VBELN")
+dtVBRP <- rbind(dtVBRP, dtPLST)
+dtVBRP <- dtVBRP[, .(VBELN, MATNR, WERKS, FKIMG, SHKZG)]
+dtVBRP <- dtVBRP[MATNR != " "] # MATNR != "A9990002" & 
+rm(dtPLST)
+
+
+dtDATA <- merge(dtVBRK, dtVBRP, by = "VBELN")
+setkey(dtDATA, "VBELN")
+# dtDATA  <- dtDATA[FKART == "FP" & SHKZG != "X",
+#                   sum(FKIMG), 
+#                   by = .(MATNR, WERKS, FKDAT)] 
+# setnames( dtDATA, c("V1"), c("SALES"))
+
+dtDATA <- dtDATA[, FKDAT:= as.Date(FKDAT, "%Y%m%d")]
+dtDATA <- dtDATA[, `:=`( CALWK  = format(FKDAT , "%Y%W"),
+                         CALMTH = format(FKDAT , "%Y%m"))]
+# dtDATA <- setcolorder(dtDATA,
+#                       c("FKDAT", "CALWK", "CALMTH",
+#                         "MATNR", "WERKS", "SALES"))
+
+rm(dtVBRK, dtVBRP)
+
+gc()
+```
+
+```{r ReadCF701_MTART, echo=FALSE, results=fRESULTS}
+dtCF701 <- fread(file.path(".", "RAW_DATA", "CF701_MTART.txt"), 
+                 sep=";", nrows = pROWS)
+
+dtCF701  <- dtCF701[, sum(FKIMG), 
+                    by = .(MATNR, WERKS, FKDAT)] 
+setnames( dtCF701, c("V1"), c("SALES"))
+
+dtCF701 <- dtCF701[, FKDAT:= as.Date(FKDAT, "%Y%m%d")]
+dtCF701 <- dtCF701[, `:=`( CALWK  = format(FKDAT , "%Y%V"),
+                           CALMTH = format(FKDAT , "%Y%m"))]
+dtCF701 <- setcolorder(dtCF701,
+                       c("FKDAT", "CALWK", "CALMTH",
+                         "MATNR", "WERKS", "SALES"))
+
+dtDATA <- dtCF701
+rm(dtCF701)
+
+```
+
+
+
+```{r LegacyStoreToSAP, echo=FALSE, results=fRESULTS}
+# add the iSynergy Store next to the legacy store
+
+dtADRC       <- fGetSAPTable(pTable = "ADRC", 
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+
+dtT001W      <- fGetSAPTable(pTable  = "T001W", 
+                             pKey    = c("WERKS"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtT001W      <- dtT001W[, 
+                        .(ADRNR, WERKS, VKORG, VTWEG, VLFKZ, LAND1, REGIO)]
+
+dtSDP_VE    <- fread(file.path(".", "RAW_DATA", "SDP_VE.csv"), 
+                sep=";")
+setkey(dtSDP_VE, "WERKS")
+
+setnames(dtADRC, "ADDRNUMBER", "ADRNR")
+
+dtWERKS  <- merge(dtT001W, 
+                  dtADRC[  , .(ADRNR, SORT2)],
+                  all.x = TRUE, by = "ADRNR")
+rm(dtADRC, dtT001W)
+
+# Select only UK stores
+dtWERKS  <- dtWERKS[substr(VKORG, 1, 2) %in% c("GB", "IE")]
+
+# # Remove stores which are not Mapped
+# dtTMP01  <- dtWERKS[ is.na(SORT2)][, SORT2:= NULL]
+# fWriteToSheet(dtTMP01, 
+#               pPath, pXLSX, "WERKS_NO_SORT2", pAppend = TRUE )
+# 
+# dtWERKS  <- dtWERKS[!is.na(SORT2)] 
+
+# Add Sales Org from list which include the closed Stores
+dtSDP_01  <- dtSDP_VE[, SORT2:= substr(WERKS, 2, 4)]
+setnames(dtSDP_01, c("WERKS"), c("LWRKS"))
+
+dtWERKS   <- merge(dtWERKS, 
+                   dtSDP_01, 
+                   all.y = TRUE, by = "SORT2" )
+rm(dtSDP_VE, dtSDP_01)
+# dtORG     <- dtWERKS[, .N, by =.(VKORG, SALESORG)]
+dtWERKS   <- dtWERKS[, `:=`(VKORG = SALESORG, 
+                            VTWEG = as.character(DISTR_CHAN))] 
+dtWERKS   <- dtWERKS[, .(WERKS, LWRKS, VKORG, VTWEG, LAND1, REGIO)]
+
+# # Quality check on Duplicates
+# dtWERKS  <- dtWERKS[, DUP:= duplicated(dtWERKS, by = "SORT2")]
+# 
+# dtTMP02  <- copy(dtWERKS)
+# dtTMP02  <- dtTMP02[, DUP:= any(DUP)          , by = "SORT2" ]
+# dtTMP02  <- dtTMP02[DUP == TRUE ]
+# fWriteToSheet(dtTMP02, pFILE, "WERKS_DUP", pAppend = TRUE )
+# fWriteToSheet(dtWERKS[DUP == TRUE], 
+#               pFILE, "LWRKS_DEL", pAppend = TRUE )
+# 
+# dtWERKS  <- dtWERKS[DUP == FALSE][, DUP:=NULL]
+```
+
+```{r CombineAndExport}
+
+# Add the iSynergy Site to the Data Set based upon Legacy site  
+setnames(dtDATA, c("WERKS"), c("LWRKS"))
+
+# dtDATA  <- dtDATA[FKART == "FP" & SHKZG != "X", 
+#                   .(MATNR, LWRKS, FKDAT, CALWK, CALMTH, FKIMG)] 
+dtDATA  <- merge(dtWERKS, dtDATA, 
+                 all.y = TRUE, by = "LWRKS")
+
+dtDATA  <- dtDATA[SALES > 0, 
+                  `:=`(EAN11  = as.character(as.numeric(MATNR)),
+                       MNTH = format(FKDAT, "%Y%m"),
+                       M    = as.factor(format(FKDAT, "%m")))]
+
+# dtDATA  <- dtDATA[SALES > 0, 
+#                   `:=`(MNTH = format(FKDAT, "%Y%m"),
+#                        M    = as.factor(format(FKDAT, "%m")))]
+
+
+dtDATA  <- dtDATA[, MATNR:= NULL] 
+
+# dtSAMPLE  <- merge(dtDATA[SALES > 0], 
+#                     dtMAT[MATKL == "140141", ],               # 0163
+#                     by = c("EAN11", "VKORG", "VTWEG"))
+
+dtSAMPLE  <- merge(dtDATA[SALES > 0], 
+                    dtMAT[BRAND == "0163", ],               # 0163
+                    by = c("EAN11", "VKORG", "VTWEG"))
+dtSAMPLE  <- setcolorder(dtSAMPLE, 
+                         c("FKDAT"    , "CALWK"        , "CALMTH"   , 
+                           "WERKS"    , "LWRKS"        , 
+                           "LAND1"    , "REGIO"        , "VKORG"    , "VTWEG",
+                           "MATNR"    , "EAN11"        , "EANTP"    ,
+                           "MSTAE"    , "MSTAE_TSH"    ,
+                           "MSTAV"    , "MSTAV_TSH"    ,
+                           "VMSTA"    , "VMSTA_TSH"    ,
+                           "MATKL"    , "MATKL_TMD"    , "MATKL_TLG", 
+                           "MATTYP"   , "MATTYP_TLG"   , 
+                           "MATGRP"   , "MATGRP_TLG"   ,
+                           "BRAND"    , "BRAND_TLG"    ,    
+                           "BRANDTYP" , 
+                           "GENDER"   , "GENDER_TLG"   ,
+                           "COLOR"    , "COLOR_TLG"    ,
+                           "STYLE"    , "STYLE_TLG"    ,    
+                           "TGTAGEGRP", "TGTAGEGRP_TLG",
+                           "TGTGRP"   , "TGTGRP_TLG"   ,
+                           "PRCBND"   , "PRCBND_TLG"   , 
+                           "SALES")) 
+
+rm(dtWERKS)
+
+write.table(dtSAMPLE[1:1000,], 
+            file = file.path("c:", "FTP", 
+                             paste0("SAP_SAMPLE_LS", ".csv")),
+            quote = TRUE     , sep = ";", na = "", dec = ".",           
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+```
+
+
+```{r sample}
+dtFRAM <- fread("C:/FTP/SAP_FRAME.csv", sep=";")
+dtSUNG <- fread("C:/FTP/SAP_SUN.csv"  , sep=";")
+```
+
+```{r Association}
+dtPOS    <- fread(file.path(".", "RAW_DATA", "BP1C300_POS.txt"),
+                  sep="\t", nrows = pROWS, colClasses="character") 
+setnames(dtPOS,
+         c("V1"   , "V2", "V3" , "V4", "V5", "V6"),
+         c("ST", "MATNR", "?", "ST", "TRX", "Q"))
+dtPOS <- dtPOS[MATNR != "", ]
+dtPOS <- dtPOS[ , Q:= as.integer(Q)] 
+dtPOS <- dtPOS[MATNR != "" & !is.na(Q), .(MATNR, TRX, Q) ]
+setkey(dtPOS, "TRX")
+
+dtTRX <- data.table(TRX = unique(dtPOS$TRX, TICKET = 1:.N))
+dtTRX <- dtTRX[, TICKET:= 1:.N]
+setkey(dtTRX, "TRX")
+dtPOS <- merge(dtPOS, dtTRX, by= "TRX")
+setkey(dtTRX, "TICKET")
+dtPOS <- dtPOS[, .(TICKET, MATNR, Q)]
+
+### Article ####
+dtMARA       <- fGetSAPTable(pTable = "MARA", 
+                             pKey = c("MATNR"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtMARA       <- dtMARA[, MATNR:= as.character(MATNR)]
+dtMARA       <- dtMARA[, 
+                       .(MATNR,     MATKL, 
+                         MSTAE,     MSTAV,     ZZCOLOR,  ZZGENDER, 
+                         ZZBRANDTP, ZZBRANDID, ZZMATGRP, ZZMATERIAL)]
+dtMARA       <- setnames(dtMARA, 
+                         c("ZZBRANDTP", "ZZCOLOR", "ZZGENDER", "ZZBRANDID",
+                           "ZZMATGRP", "ZZMATERIAL"), 
+                         c("BRANDTYP" , "COLOR"  , "GENDER"  , "BRAND",
+                           "MATGRP", "MATTYP")) 
+
+#### Material Text ####
+dtMAKT       <- fGetSAPTable(pTable = "MAKT", 
+                             pKey = c("MATNR"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtMAKT       <- dtMAKT[SPRAS == "E", .(MATNR, MAKTX)]
+dtMARA       <- merge(dtMARA, dtMAKT, by = "MATNR")
+dtMARA       <- dtMARA[, .(MATNR, MAKTX)]
+
+dtPOS <- merge(dtPOS, dtMARA, by = "MATNR")
+dtPOS <- dtPOS[, MATNR:=as.integer(MATNR)]
+
+write.table(dtPOS, 
+            file = file.path("c:", "FTP", 
+                             paste0("SAP_SAMPLE_ASS", ".csv")),
+            quote = TRUE     , sep = ";", na = "", dec = ".",           
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+
+```
+
+```{r Clustering}
+dtDATA <- merge(dtDATA[SALES > 0], 
+                dtMAT[, 
+                      .(EAN11 , VKORG     , VTWEG    ,
+                        MATKL , MATKL_TMD , MATTYP   , MATTYP_TLG, 
+                        MATGRP, MATGRP_TLG, BRAND_TLG, BRANDTYP  , 
+                        GENDER, GENDER_TLG, COLOR    , COLOR_TLG ,  
+                        STYLE , STYLE_TLG , TGTAGEGRP, TGTAGEGRP_TLG, 
+                        TGTGRP, TGTGRP_TLG, PRCBND   , PRCBND_TLG)],               # 0163
+                    by = c("EAN11", "VKORG", "VTWEG"))
+
+dtSAMPLE <- dtDATA[, sum(SALES), 
+                   by = .(WERKS , LAND1, REGIO,
+                          MATKL , MATKL_TMD , MATTYP   , MATTYP_TLG, 
+                          MATGRP, MATGRP_TLG, BRAND_TLG, BRANDTYP  , 
+                          GENDER, GENDER_TLG, COLOR    , COLOR_TLG ,  
+                          STYLE , STYLE_TLG , TGTAGEGRP, TGTAGEGRP_TLG, 
+                          TGTGRP, TGTGRP_TLG, PRCBND   , PRCBND_TLG)]
+setnames(dtSAMPLE, "V1", "Q")
+
+dtSAMPLE  <- setcolorder(dtSAMPLE, 
+                         c("WERKS"    , "LAND1"        , "REGIO"    , 
+                           "MATKL"    , "MATKL_TMD"    ,  
+                           "MATTYP"   , "MATTYP_TLG"   , 
+                           "MATGRP"   , "MATGRP_TLG"   ,
+                           "BRAND_TLG"    ,    
+                           "BRANDTYP" , 
+                           "GENDER"   , "GENDER_TLG"   ,
+                           "COLOR"    , "COLOR_TLG"    ,
+                           "STYLE"    , "STYLE_TLG"    ,    
+                           "TGTAGEGRP", "TGTAGEGRP_TLG",
+                           "TGTGRP"   , "TGTGRP_TLG"   ,
+                           "PRCBND"   , "PRCBND_TLG"   , 
+                           "Q")) 
+write.table(dtSAMPLE, 
+            file = file.path("c:", "FTP", 
+                             paste0("SAP_SAMPLE_CLST", ".csv")),
+            quote = TRUE     , sep = ";", na = "", dec = ".",           
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+```
+

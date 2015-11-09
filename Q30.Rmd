@@ -15,6 +15,8 @@ output:
 \newpage
 ![Logo](http://www.grandvision.com/img/logoGV.png) 
 
+[DESIGN](https://projects.gvshare.com/iSynergy/01_Release_1/06._Reporting/02._Design/01._FDs/R20_POS Sales - Margin/)
+
 ```{r RSetup, echo=FALSE, eval=TRUE, cache=FALSE, results='hide'}
 
 rm(list=ls())
@@ -30,7 +32,7 @@ fRESULTS <- 'hide'
 # SAP systems to use
 pECC_SYST <- "RP1"
 pECC_CLNT <- "300"
-pBI_SYST  <- "BP1" 
+pBI_SYST  <- "BA1" 
 pBI_CLNT  <- "300"
 pLGCINDC  <- "C"
 
@@ -39,10 +41,8 @@ pOPCO     <- "VEUK"
 pROWS     <- -1L
 pSMALL    <- 1000
 pEXP      <- FALSE
-# pPART     <- "2014H1"
 pPath     <- "./60_Results"  
 pXLSX     <- paste0(pOPCO, "_SALES") 
-# pFILE     <- paste(  pOPCO        ,      pBI_SYST,      pPART, sep = "_") 
 pEXPORT   <- paste0("POS_HISTORY" , ".csv") 
 
 # Open Excel for storing results
@@ -55,47 +55,6 @@ fWriteToSheet(data.frame(ECCSYST = pECC_SYST,
                          BI_SYST = pBI_SYST ,
                          BI_CLNT = pBI_CLNT), 
               pPath, pXLSX, "PARAM", pAppend = FALSE )
-
-```
-
-```{r SplitVBRP, echo=FALSE, eval=FALSE, results='hide'}
-# dtVBRP <- fread(file.path(".", "RAW_DATA", "VBRP_TRX_Q30.txt"), 
-#                 sep=";", nrows = pROWS)
-# setkey(dtVBRP, "VBELN")
-# 
-# dtVBRPL <- fread(file.path(".", "RAW_DATA", "VBRP_TRX_L30.txt"), 
-#                 sep=";", nrows = pROWS)
-# setkey(dtVBRPL, "VBELN")
-# 
-# dtVBRP <- rbind(dtVBRP, dtVBRPL)
-# rm(dtVBRPL)
-
-# l_months <- sort(unique(substr(dtVBRP$FBUDA, 1, 6)))
-# dtMonths <- dtVBRP[, .N, by=.(substr(dtVBRP$FBUDA, 1, 6))]
-
-# Split teh data in 3 files due to memeory constraints
-# write.table(dtVBRP[substr(dtVBRP$FBUDA, 1, 6) %in% l_months[1:6]], 
-#             file = file.path("c:", "FTP", 
-#                              paste0("VBRP", "_", 
-#                                     pBI_SYST, "_", "2014H1", ".csv")), 
-#             quote = TRUE     , sep = ";", na = "", 
-#             dec = ".", 
-#             row.names = FALSE, col.names = TRUE, append = FALSE)
-# 
-# write.table(dtVBRP[substr(dtVBRP$FBUDA, 1, 6) %in% l_months[7:12]], 
-#             file = file.path("c:", "FTP", 
-#                              paste0("VBRP", "_", 
-#                                     pBI_SYST, "_", "2014H2", ".csv")),
-#             quote = TRUE     , sep = ";", na = "", dec = ".",           
-#             row.names = FALSE, col.names = TRUE, append = FALSE)
-# 
-# write.table(dtVBRP[substr(dtVBRP$FBUDA, 1, 6) %in% l_months[13:18]], 
-#             file = file.path("c:", "FTP", 
-#                              paste0("VBRP", "_", 
-#                                     pBI_SYST, "_", "2015H2", ".csv")),
-#             quote = TRUE     , sep = ";", na = "", dec = ".",           
-#             row.names = FALSE, col.names = TRUE, append = FALSE)
-# rm(list=ls())
 ```
 
 ```{r ReadRawData, echo=fECHO, eval=fEVAL, results=fRESULTS}
@@ -114,7 +73,7 @@ dtT001W      <- fGetSAPTable(pTable  = "T001W", pKey = c("WERKS"),
 
 dtPLANT      <- fGetSAPTable(pTable  = "#BI0#PPLANT",
                              pKey    = "PLANT",
-                             pSystID = "BP1", pClient = "300")
+                             pSystID = pBI_SYST, pClient = "300")
 
 dtSDP_VE    <- fread(file.path(".", "RAW_DATA", "SDP_VE.csv"), 
                 sep=";")
@@ -123,12 +82,12 @@ setkey(dtSDP_VE, "WERKS")
 # DataSource related
 dtRSDSSEGFD  <- fGetSAPTable(pTable  = "RSDSSEGFD", 
                              pKey    = c("DATASOURCE", "POSIT"),
-                             pSystID = "BP1", pClient = "300")
+                             pSystID = pBI_SYST, pClient = "300")
 dtRSDSSEGFD  <- dtRSDSSEGFD[DATASOURCE == "G1_DS_PA_HIST_FLAT_FILE" ] #G0_DS_LEGACY_SLS_TD
 
 dtRSDSSEGFDT <- fGetSAPTable(pTable  = "RSDSSEGFDT", 
                              pKey    = c("DATASOURCE", "POSIT"), 
-                             pSystID = "BP1", pClient = "300")
+                             pSystID = pBI_SYST, pClient = "300")
 dtRSDSSEGFDT <- dtRSDSSEGFDT[DATASOURCE == "G1_DS_PA_HIST_FLAT_FILE" & LANGU == "E" ]
 
 # Load Legacy Billing Header and Combine
@@ -313,7 +272,6 @@ fWriteToSheet(dtSDP_01,
 dtWERKS   <- merge(dtWERKS, 
                    dtSDP_01, 
                    all.y = TRUE, by = "SORT2" )
-# dtORG     <- dtWERKS[, .N, by =.(VKORG, SALESORG)]
 
 # stores With Sales
 dtTMP03 <- dtWERKS[!(LWRKS %in% unique(dtDATA$WERKS))]
@@ -347,14 +305,11 @@ l_DUMMIES_LIST <- setdiff(l_DUMMIES_LIST, l_DUMMIES_USED )
 
 # Introduce dummy stores for closed stores which are not in iSYnergy
 l_WERKS <- nrow(dtWERKS[is.na(WERKS)])
-dtWERKS <- dtWERKS[, WERKS:= ifelse(is.na(WERKS),
-                                    paste0(pLGCINDC, 
-                                    str_pad(1:l_WERKS, 3, pad ="0")),
-                                    WERKS)]
+dtWERKS <- dtWERKS[is.na(WERKS), 
+                   WERKS:= paste0(pLGCINDC, str_pad(1:l_WERKS, 3, pad ="0"))]
 fWriteToSheet(dtWERKS, 
               pPath, pXLSX, "SITE_MAPPING", pAppend = TRUE )
 
-# dtDATA  <- dtDATA[, SORT2:= substr(LWRKS, 2, 4) ] 
 dtDATA  <- merge(dtWERKS, dtDATA, 
                  all.y = TRUE, by = "LWRKS")
 
@@ -424,6 +379,7 @@ dtMATNR <- merge(data.table(LMTNR = unique(dtDATA$LMTNR)),
                  by = "LMTNR", all.x= TRUE)
 
 # Introduce dummy Articles for Articles which are not in iSYnergy
+l_MATNR <- nrow(dtMATNR[is.na(MATNR)])
 dtMATNR <- dtMATNR[, 
                    `:=` (EANTP = "Z2",
                          MATNR = ifelse(is.na(MATNR),
@@ -472,7 +428,7 @@ setnames(dtDATA,
            "NETVAL_INV"    , "TAX_AMOUNT", "RETPRCOST"
          ))
 
-# # Select and Order the fields in the same order as the DataSource
+# Select and Order the fields in the same order as the DataSource
 dtDATA <- dtDATA[, dtDS$FIELDNM, with = FALSE]
 
 # dtDATA <- dtDATA[,

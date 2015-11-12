@@ -75,6 +75,10 @@ dtPLANT      <- fGetSAPTable(pTable  = "#BI0#PPLANT",
                              pKey    = "PLANT",
                              pSystID = pBI_SYST, pClient = "300")
 
+setnames(dtPLANT, "/BIC/G1LGSTNO", "G1LGSTNO")
+### Temporary deletion of Legacy closed
+# dtPLANT     <- dtPLANT[(!substr(PLANT, 1, 1) %in% c("H", "C")),]
+
 dtSDP_VE    <- fread(file.path(".", "RAW_DATA", "SDP_VE.csv"), 
                 sep=";")
 setkey(dtSDP_VE, "WERKS")
@@ -236,8 +240,28 @@ dtDATA <- dtDATA[, `:=`(
   RETTRCOST      =                                    0,  # not maintained in VEUK system
   G1DISCIT       =                                    0,  # not maintained in VEUK system
   ABRVW          =                                 NULL,  # not needed anymore
-  FBUDA          =                                 NULL   # not needed anymore 
-  )]
+  FBUDA          =                                 NULL,   # not needed anymore 
+  G1NTSLINT      = 0 ,
+  G1LISLINT      = 0
+   )]
+
+# Apply Discount Logic
+dtDSCD <- fread("./RAW_DATA/DSCD.txt", sep = ";"  )
+dtDSCD <- dtDSCD[, MATNR:= gsub("(^|[^0-9])0+", "\\1", MATNR, perl = TRUE)]
+
+dtDATA[MATNR %in% dtDSCD$MATNR, `:=`(G1DISCIT  = -NETWR, 
+                                     NETWR     = 0,
+                                     MWSBP     = -MWSBP,
+                                     G1NTSLINT = 0,
+                                     G1LISLINT = 0   )]
+
+# setnames(dtDSCD, 
+#          c("MATNR", "EAN11"),
+#          c("EAN11", "LEAN11"))
+# 
+# dtDSCD2 <- merge(dtDSCD, 
+#                dtMEAN[EANTP == "Z2", .(MATNR, EAN11)],
+#                by = "EAN11")
 
 rm(dtTRXFLG)
 # table(paste0(dtDATA$ABRVW, dtDATA$SHKZG,dtDATA$RETAILTYPECODE))
@@ -247,72 +271,123 @@ rm(dtTRXFLG)
 
 ```{r LegacyStoreToSAP, echo=FALSE, results=fRESULTS}
 # add the iSynergy Store next to the legacy store
-setnames(dtADRC, "ADDRNUMBER", "ADRNR")
 
-dtWERKS  <- merge(dtT001W[ , .(ADRNR, WERKS, VKORG, VTWEG, VLFKZ)], 
-                  dtADRC[  , .(ADRNR, SORT2)],
-                  all.x = TRUE, by = "ADRNR")
+dtPLANT <- dtPLANT[SALESORG %in% c("", "GB13", "GB07", "IE11")]
+dtPLANT <- dtPLANT[!PLANT %in% c("0000", "")]
 
-# Select only UK stores
-dtWERKS  <- dtWERKS[substr(VKORG, 1, 2) %in% c("GB", "IE")]
+# Allign with ECC Logic
+dtPLANT <- dtPLANT[nchar(G1LGSTNO) != 4 & 
+                   !is.na(G1LGSTNO) &
+                     G1LGSTNO != ""]
 
-# Remove stores which are not Mapped
-dtTMP01  <- dtWERKS[ is.na(SORT2)][, SORT2:= NULL]
-fWriteToSheet(dtTMP01, 
-              pPath, pXLSX, "WERKS_NO_SORT2", pAppend = TRUE )
+# fWriteToSheet(dtPLANT[SALESORG ==""], 
+#               pPath, pXLSX, "Closed_sites", pAppend = TRUE)
 
-dtWERKS  <- dtWERKS[!is.na(SORT2)] 
+l_G1LGSTNO <- unique(substr(dtDATA$WERKS, 2, 4))
+dtTMP11    <- data.frame(DIFF = setdiff(l_G1LGSTNO      , dtPLANT$G1LGSTNO))  # In sales but not in master data
+dtTMP12    <- data.frame(DIFF = setdiff(dtPLANT$G1LGSTNO, l_G1LGSTNO))        # In master data but not in Sales
 
-# Add Sales Org from list which include the closed Stores
-dtSDP_01  <- copy(dtSDP_VE[, SORT2:= substr(WERKS, 2, 4)])
-setnames(dtSDP_01, c("WERKS"), c("LWRKS"))
-fWriteToSheet(dtSDP_01, 
-              pPath, pXLSX, "LegacyStore_incl_Closed", pAppend = TRUE )
-
-dtWERKS   <- merge(dtWERKS, 
-                   dtSDP_01, 
-                   all.y = TRUE, by = "SORT2" )
-
-# stores With Sales
-dtTMP03 <- dtWERKS[!(LWRKS %in% unique(dtDATA$WERKS))]
+dtTMP03 <- dtPLANT[!(G1LGSTNO %in% l_G1LGSTNO)]
 fWriteToSheet(dtTMP03, 
               pPath, pXLSX, "WERKS_WO_SLS", pAppend = TRUE )
 
-dtWERKS <- dtWERKS[LWRKS %in% unique(dtDATA$WERKS)]
+dtPLANT <- dtPLANT[G1LGSTNO %in% l_G1LGSTNO]
+
+
+# Check Mapping for duplicates
+dtPLANT  <- dtPLANT[, DUP:= duplicated(dtPLANT, by = "G1LGSTNO")]
+
+dtTMP22  <- copy(dtPLANT)
+dtTMP22  <- dtTMP22[, DUP2:= any(DUP)         , by = "G1LGSTNO" ]
+dtTMP22  <- dtTMP22[DUP2 == TRUE ][order(G1LGSTNO)]
+fWriteToSheet(dtTMP22, 
+              pPath, pXLSX, "PLANT_DUP", pAppend = TRUE )
+fWriteToSheet(dtPLANT[DUP == TRUE], 
+              pPath, pXLSX, "LPLT_DEL", pAppend = TRUE )
+
+dtPLANT  <- dtPLANT[DUP == FALSE][, DUP:=NULL]
+
+# Sites from ECC
+# setnames(dtADRC, "ADDRNUMBER", "ADRNR")
+# 
+# dtWERKS  <- merge(dtT001W[ , .(ADRNR, WERKS, VKORG, VTWEG, VLFKZ)], 
+#                   dtADRC[  , .(ADRNR, SORT2)],
+#                   all.x = TRUE, by = "ADRNR")
+# 
+# # Select only UK stores
+# dtWERKS  <- dtWERKS[substr(VKORG, 1, 2) %in% c("GB", "IE")]
+
+# Remove stores which are not Mapped
+# dtTMP01  <- dtWERKS[ is.na(SORT2)][, SORT2:= NULL]
+# fWriteToSheet(dtTMP01, 
+#               pPath, pXLSX, "WERKS_NO_SORT2", pAppend = TRUE )
+# 
+# dtWERKS  <- dtWERKS[!is.na(SORT2)] 
+
+# Add Sales Org from list which include the closed Stores
+# dtSDP_01  <- copy(dtSDP_VE[, SORT2:= substr(WERKS, 2, 4)])
+# dtSDP_01  <- dtSDP_01[, G1LGSTNO:= SORT2]
+# setnames(dtSDP_01, c("WERKS"), c("LWRKS"))
+# fWriteToSheet(dtSDP_01, 
+#               pPath, pXLSX, "LegacyStore_incl_Closed", pAppend = TRUE )
+
+# dtPLANT <- merge(dtPLANT[ , .(PLANT, G1LGSTNO)],
+#                  dtSDP_01,
+#                  all.y = TRUE, by = "G1LGSTNO")
+
+################################################################ TEMPORARY SAMPLE FOR BP1 ########
+# setnames(dtPLANT , c("WERKS", "PLANT"), c("LWRKS", "WERKS"))
+# setnames(dtDATA  , c("WERKS")         , c("LWRKS"))
+# dtDATA  <- merge(dtPLANT[, .(LWRKS, WERKS, SALESORG, DISTR_CHAN)], dtDATA, 
+#                  all.y = TRUE, by = "LWRKS")
+
+##################################################################################################
+
+# dtWERKS   <- merge(dtWERKS, 
+#                    dtSDP_01, 
+#                    all.y = TRUE, by = "SORT2" )
+
+# stores With Sales
+# dtTMP03 <- dtWERKS[!(LWRKS %in% unique(dtDATA$WERKS))]
+# fWriteToSheet(dtTMP03, 
+#               pPath, pXLSX, "WERKS_WO_SLS", pAppend = TRUE )
+# 
+# dtWERKS <- dtWERKS[LWRKS %in% unique(dtDATA$WERKS)]
 
 # Quality check on Duplicates
-dtWERKS  <- dtWERKS[, DUP:= duplicated(dtWERKS, by = "SORT2")]
-
-dtTMP02  <- copy(dtWERKS)
-dtTMP02  <- dtTMP02[, DUP2:= any(DUP)         , by = "SORT2" ]
-dtTMP02  <- dtTMP02[DUP2 == TRUE ]
-fWriteToSheet(dtTMP02, 
-              pPath, pXLSX, "WERKS_DUP", pAppend = TRUE )
-fWriteToSheet(dtWERKS[DUP == TRUE], 
-              pPath, pXLSX, "LWRKS_DEL", pAppend = TRUE )
-
-dtWERKS  <- dtWERKS[DUP == FALSE][, DUP:=NULL]
-dtWERKS  <- dtWERKS[, .(WERKS, LWRKS, SALESORG, DISTR_CHAN)]
+# dtWERKS  <- dtWERKS[, DUP:= duplicated(dtWERKS, by = "SORT2")]
+# 
+# dtTMP02  <- copy(dtWERKS)
+# dtTMP02  <- dtTMP02[, DUP2:= any(DUP)         , by = "SORT2" ]
+# dtTMP02  <- dtTMP02[DUP2 == TRUE ]
+# fWriteToSheet(dtTMP02, 
+#               pPath, pXLSX, "WERKS_DUP", pAppend = TRUE )
+# fWriteToSheet(dtWERKS[DUP == TRUE], 
+#               pPath, pXLSX, "LWRKS_DEL", pAppend = TRUE )
+# 
+# dtWERKS  <- dtWERKS[DUP == FALSE][, DUP:=NULL]
+# dtWERKS  <- dtWERKS[, .(WERKS, LWRKS, SALESORG, DISTR_CHAN)]
 
 # Add the iSynergy Site to the Data Set based upon Legacy site  
-setnames(dtDATA, c("WERKS"), c("LWRKS"))
+dtDATA[, G1LGSTNO:= substr(WERKS, 2, 4)]
 
 # Create List of Dummy stores which are not used
-setnames(dtPLANT, c("/BIC/G1LGSTNO"), c("G1LGSTNO"))
-l_DUMMIES_USED <- dtPLANT[substr(PLANT,1,1) == pLGCINDC, .(PLANT, G1LGSTNO)]
-l_DUMMIES_LIST <- paste0(pLGCINDC, str_pad(1:1000, 3, pad ="0"))
-l_DUMMIES_LIST <- setdiff(l_DUMMIES_LIST, l_DUMMIES_USED )
+# setnames(dtPLANT, c("/BIC/G1LGSTNO"), c("G1LGSTNO"))
+# l_DUMMIES_USED <- dtPLANT[substr(PLANT,1,1) == pLGCINDC, .(PLANT, G1LGSTNO)]
+# l_DUMMIES_LIST <- paste0(pLGCINDC, str_pad(1:1000, 3, pad ="0"))
+# l_DUMMIES_LIST <- setdiff(l_DUMMIES_LIST, l_DUMMIES_USED )
+# 
+# # Introduce dummy stores for closed stores which are not in iSYnergy
+# l_WERKS <- nrow(dtWERKS[is.na(WERKS)])
+# dtWERKS <- dtWERKS[is.na(WERKS), 
+#                    WERKS:= paste0(pLGCINDC, str_pad(1:l_WERKS, 3, pad ="0"))]
+# fWriteToSheet(dtWERKS, 
+#               pPath, pXLSX, "SITE_MAPPING", pAppend = TRUE )
 
-# Introduce dummy stores for closed stores which are not in iSYnergy
-l_WERKS <- nrow(dtWERKS[is.na(WERKS)])
-dtWERKS <- dtWERKS[is.na(WERKS), 
-                   WERKS:= paste0(pLGCINDC, str_pad(1:l_WERKS, 3, pad ="0"))]
-fWriteToSheet(dtWERKS, 
-              pPath, pXLSX, "SITE_MAPPING", pAppend = TRUE )
+dtDATA  <- merge(dtPLANT, dtDATA, 
+                 all.y = TRUE, by = "G1LGSTNO")
 
-dtDATA  <- merge(dtWERKS, dtDATA, 
-                 all.y = TRUE, by = "LWRKS")
-
+rm(dtTMP22, dtTMP12, dtTMP11, dtTMP03, dtTMP04)
 
 ```
 
@@ -417,12 +492,10 @@ rm(dtRSDSSEGFD, dtRSDSSEGFDT)
 
 setnames(dtDATA,
          c("FKDAT"         , "VBELN"     , "POSNR"     ,    
-           "LWRKS"         , "WERKS"     , 
            "LMTNR"         , "MATNR"     , 
            "VRKME"         , "STWAE"     ,
            "NETWR"         , "MWSBP"     , "WAVWR"),
          c("SLSDATE"       , "BILL_NUM"  , "BILL_ITEM" ,  
-           "G1LGSTNO"      , "PLANT"     , 
            "G1LGART"       , "MATERIAL"  , 
            "UNIT"          , "DOC_CURRCY",
            "NETVAL_INV"    , "TAX_AMOUNT", "RETPRCOST"
@@ -442,6 +515,8 @@ dtDATA <- dtDATA[, dtDS$FIELDNM, with = FALSE]
 # ZFTP_FN_POS_HISTORY
 # usr/sap/BA1/FTP/POS/HISTORY/POS_HISTORY.csv
 
+dtDATA2 <- dtDATA[PLANT %in% c("1001", "1263", "1420", "1039")]
+
 if(pEXP){
   write.table(dtDATA, 
               file = file.path("c:", "FTP", pEXPORT),
@@ -449,7 +524,7 @@ if(pEXP){
               row.names = FALSE, col.names = TRUE, append = FALSE)
   }
 
-write.table(dtDATA[1:pSMALL], 
+write.table(dtDATA2, 
             file = file.path("c:", "FTP", 
                              paste0("POS_HISTORY_small" , "_"      , 
                                     pECC_SYST, ".csv")) ,
@@ -482,3 +557,18 @@ head(dtDATA[, c(21:ncol(dtDATA)), with = FALSE])
 
 rm(dtDS)
 ```
+
+
+
+
+     CASE  wa_plant-country.
+        WHEN 'GB' OR 'IE' OR 'JE'.
+*      IF wa_plant-country = 'GB'.
+          RESULT = SOURCE_FIELDS-netval_inv + SOURCE_FIELDS-tax_amount.
+        WHEN 'NL' OR 'BE'.
+*      ELSE.
+          RESULT = ( SOURCE_FIELDS-netval_inv + SOURCE_FIELDS-g1discit )
+          +  SOURCE_FIELDS-tax_amount.
+        WHEN OTHERS.
+          RESULT = 0.
+      ENDCASE.

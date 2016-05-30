@@ -1,0 +1,98 @@
+---
+title: "TDMS"
+author: "F.J.Padt"
+date: "`r Sys.Date()`"
+output: 
+   pdf_document:
+    toc:             true
+    toc_depth:       2
+    number_sections: true
+    fig_caption:     true
+    fig_crop:        true
+    highlight:       tango    
+---
+
+\newpage
+![Logo](http://www.grandvision.com/img/logoGV.png) 
+
+```{r RSetup, echo=FALSE, eval=TRUE, cache=FALSE, results='hide'}
+
+rm(list=ls())
+gc()
+
+source('../QAR/00_RProj/00_Global/iSynGeneral.R')
+
+# Data Settings
+fECHO    <- FALSE
+fEVAL    <- TRUE
+fRESULTS <- 'hide' 
+
+# SAP systems to use
+pECC_SYST <- "RP1"
+pECC_CLNT <- "300"
+pBI_SYST  <- "BA1" 
+pBI_CLNT  <- "300"
+pLGCINDC  <- "C"
+
+# Data Settings
+pOPCO     <- "VEUK"
+pROWS     <- -1L
+pSMALL    <- 1000
+pEXP      <- FALSE
+pPath     <- "./60_Results"  
+pXLSX     <- paste0(pOPCO, "_SALES") 
+pEXPORT   <- paste0("POS_HISTORY" , ".csv") 
+
+# Open Excel for storing results
+if(file.exists(paste0(pPath, "/", pXLSX, ".xlsx")) == TRUE){
+   file.remove(paste0(pPath, "/", pXLSX, ".xlsx"))
+}
+
+fWriteToSheet(data.frame(ECCSYST = pECC_SYST, 
+                         ECCCLNT = pECC_CLNT,
+                         BI_SYST = pBI_SYST ,
+                         BI_CLNT = pBI_CLNT), 
+              pPath, pXLSX, "PARAM", pAppend = FALSE )
+```
+
+```{r ReadRawData, echo=fECHO, eval=fEVAL, results=fRESULTS}
+set.seed(1)
+library(data.table)
+
+# Read History
+dtDAT <- fread("c:/FTP/VEUK_POS_HISTORY.csv", sep=",", colClasses = "character", 
+               drop = c("G1LOFLAG", "G1SPECFG"))
+setkey(dtDAT, "MATERIAL")
+vNames <- names(dtDAT)
+
+setkey(dtDAT, "MATERIAL")
+dtMAT_TD <- dtDAT[, .N, keyby=MATERIAL][, N:=NULL]
+dtMAT_MD <- fread("c:/FTP/BA1_MATERIAL.txt"
+                  , sep=";", colClasses = "character", select = c("V1", "V49"))
+setnames(dtMAT_MD, c("MATERIAL", "MGH3"))
+setkey(dtMAT_MD, "MATERIAL")
+
+dtMAT <- dtMAT_MD[dtMAT_TD]
+dtMAT[, ID:= 1:.N]
+
+dtMAP <- copy(dtMAT)
+dtMAP[, ID:= sample(x = ID, size = .N, replace=FALSE), by=MGH3]
+
+dtMAP <- dtMAP[dtMAT, on="ID"][, .(i.MATERIAL, MATERIAL)]
+setnames(dtMAP, 
+         c("i.MATERIAL", "MATERIAL"),
+         c("MATERIAL"  , "MAT_SAMPLE"))
+setkey(dtMAP, "MATERIAL")
+
+dtDAT <- dtMAP[dtDAT, nomatch = 0][, MATERIAL:= NULL]
+setnames(dtDAT, "MAT_SAMPLE", "MATERIAL")
+
+rm(dtMAP, dtMAT, dtMAT_MD, dtMAT_TD)
+gc()
+```
+
+"MATERIAL" unique from TD -> MD -> Scambled mapping ->Join
+"SALESORG" unique from TD ->       sample from set without replace DE & FR -> JOIN in PLANT MD
+"PLANT"    unique from TD ->       Sample from set with    replace DE & FR -> JOIN
+"BILL_NUM" unique from TD ->       recode                                  -> Join Back
+

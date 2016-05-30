@@ -17,6 +17,8 @@ output:
 
 ```{r RSetup, echo=FALSE, eval=TRUE, cache=FALSE, results='hide'}
 
+rm(list=ls())
+
 source('../QAR/00_RProj/00_Global/iSynGeneral.R')
 
 # Data Settings
@@ -25,20 +27,20 @@ fEVAL    <- TRUE
 fRESULTS <- 'hide' 
 
 # SAP systems to use
-pECC_SYST <- "RA1"
-pECC_CLNT <- "250"
-pBI_SYST  <- "BA1" 
-pBI_CLNT  <- "200"
-pLGCINDC  <- "H"
+# pECC_SYST <- "RA1"
+# pECC_CLNT <- "250"
+pBI_SYST  <- "BP1" 
+pBI_CLNT  <- "300"
+# pLGCINDC  <- "H"
 
 # Data Settings
 pOPCO     <- "VEUK"
-pROWS     <- 1000
-pSMALL    <- 1000
-pEXP      <- FALSE
-pPART     <- ""
-pFILE     <- paste(  pOPCO, "_KLNTTLR" , pBI_SYST,      pPART, sep="_") 
-pSRCF     <- paste0("VEUK"       , "_", pBI_SYST, "_", pPART, ".csv")
+# pROWS     <- 1000
+# pSMALL    <- 1000
+# pEXP      <- FALSE
+# pPART     <- ""
+# pFILE     <- paste(  pOPCO, "_KLNTTLR", pBI_SYST,      pPART, sep="_") 
+# pSRCF     <- paste0("VEUK", "_"       , pBI_SYST, "_", pPART, ".csv")
 
 pPath     <- "./60_Results" 
 pXLSX     <- paste0(pOPCO, "_KLNTTLR") 
@@ -48,39 +50,45 @@ if(file.exists(paste0(pPath, "/", pXLSX, ".xlsx")) == TRUE){
    file.remove(paste0(pPath, "/", pXLSX, ".xlsx"))
 }
 
-fWriteToSheet(data.frame(ECCSYST = pECC_SYST, 
-                         ECCCLNT = pECC_CLNT,
-                         BI_SYST = pBI_SYST ,
-                         BI_CLNT = pBI_CLNT), 
+fWriteToSheet(data.frame(ECCSYST = "VISITOR"), 
               pPath, pXLSX, "PARAM"   , pAppend = FALSE )
 ```
 
 
 ```{r ReadRawData, echo=fECHO, eval=fEVAL}
 
-dtADRC      <- fGetTable(pTable = "ADRC", 
-                         pSystID = pECC_SYST, pClient = pECC_CLNT)
+# dtADRC      <- fGetTable(pTable = "ADRC", 
+#                          pSystID = pECC_SYST, pClient = pECC_CLNT)
+# 
+# dtT001W     <- fGetTable(pTable = "T001W", pKey = c("WERKS"),
+#                          pSystID = pECC_SYST, pClient = pECC_CLNT)
 
-dtT001W     <- fGetTable(pTable = "T001W", pKey = c("WERKS"),
-                         pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtPLANT     <- fGetEXPTable(pTable  = "#BI0#PPLANT",
+                            pKey    = "PLANT",
+                            pSystID = pBI_SYST, pClient = "300")
+dtPLANT     <- dtPLANT[PLANTCAT == "A"] 
+setnames(dtPLANT, "/BIC/G1LGSTNO", "G1LGSTNO")
 
-dtRSDSSEGFD <- fGetTable(pTable = "RSDSSEGFD", 
-                         pSystID = pBI_SYST, pClient = pBI_CLNT)
+dtRSDSSEGFD <- fGetEXPTable(pTable = "RSDSSEGFD", 
+                            pSystID = pBI_SYST, pClient = pBI_CLNT)
 
-dtDATA     <- read_excel(
-  file.path(".", "RAW_DATA", 
-            "VEUK Visitor Counter - Actual 14.15 traffic.xlsx"),
-  sheet = "2014 Actual", col_names = TRUE, 
-  col_types = c("text", "text", "numeric", "numeric", "blank"))
+# dtDATA     <- read_excel(
+#   file.path(".", "RAW_DATA", 
+#             "VEUK Visitor Counter - Actual 14.15 traffic.xlsx"),
+#   sheet = "2014 Actual", col_names = TRUE, 
+#   col_types = c("text", "text", "numeric", "numeric", "blank"))
 
-dtDATA <- as.data.table(dtDATA)
+dtDATA <- fread("./raw_data/vefootfallhistory.csv", 
+                sep = "|", stringsAsFactors = FALSE )
 
 setnames(
   dtDATA,
-  c("WERKS", "CALDAY", 
-    "IN1"  ,  "IN2" ))
+  c("STORE_NUMBER", "COUNTER_DATE", "COUNTER_TIME",
+    "COUNTER1_IN" , "COUNTER1_OUT", "COUNTER2_IN" , "COUNTER2_OUT"),
+  c("G1LGSTNO", "CALDAY", "REGHR" , 
+    "IN1"     , "OUT1"  , "IN2"   , "OUT2"))
 
-setkey(dtDATA, "WERKS", "CALDAY")
+setkey(dtDATA, "G1LGSTNO", "CALDAY", "REGHR")
 ```
 
 # Historical Data #
@@ -111,8 +119,8 @@ fWriteToSheet(head(dtDATA[1:10]), pPath, pXLSX, "DATA"   , pAppend = TRUE)
 system.time(
   dtDATA <- dtDATA[, `:=`(
     RECORDMODE = "N",
-    WERKS      = str_pad(WERKS, 3, pad ="0"),
-    REGHR      = "000000",
+    G1LGSTNO   = str_pad(G1LGSTNO, 3, pad ="0"),
+    REGHR      = paste0(gsub(pattern = ":", replacement = "", REGHR), "00"),
     IN1        = as.integer(IN1),
     OUT1       = as.integer(IN1),
     IN2        = as.integer(IN2),
@@ -121,68 +129,98 @@ system.time(
 gc()
 
 # Quality check on Duplicates
-dtDATA  <- dtDATA[, DUP   := duplicated(dtDATA, by = c("WERKS", "CALDAY"))]
-dtDATA  <- dtDATA[, DUPALL:= any(DUP)         , by = c("WERKS", "CALDAY") ]
+dtDATA  <- dtDATA[, DUP   := duplicated(dtDATA, by = c("G1LGSTNO", "CALDAY", "REGHR"))]
+dtDATA  <- dtDATA[, DUPALL:= any(DUP)         , by = c("G1LGSTNO", "CALDAY", "REGHR") ]
 
-dtDATA <- dtDATA[ DUP == FALSE]
+dtTMP0 <- dtDATA[DUPALL == TRUE]
+fWriteToSheet(dtTMP0, pPath   , pXLSX, "DOUBLES"   , pAppend = TRUE)
+
+dtDATA <- dtDATA[, .(IN1 = sum(IN1), OUT1 = sum(OUT1), 
+                     IN2 = sum(IN2), OUT2 = sum(OUT2)),
+                     by = .(G1LGSTNO, CALDAY, REGHR, RECORDMODE)]
 ```
 
 ```{r LegacyStoreToSAP, echo=fECHO, eval=FALSE, results=fRESULTS}
 # add the iSynergy Store next to the legacy store
-setnames(dtADRC, "ADDRNUMBER", "ADRNR")
+# PLANT
+dtPLANT <- dtPLANT[SALESORG %in% c("GB13", "IE11") ]
 
-dtWERKS  <- merge(dtT001W[ , .(ADRNR, WERKS, VKORG, VTWEG, VLFKZ)], 
-                  dtADRC[  , .(ADRNR, SORT2)],
-                  all.x = TRUE, by = "ADRNR")
+dtPLANT <- dtPLANT[!(substr(PLANT, 1, 1) == "C" & 
+                     substr(PLANT, 1, 1) == "Z" & 
+                     substr(PLANT, 1, 1) == "Y")]
+
+fWriteToSheet(dtPLANT[nchar(G1LGSTNO) > 3], 
+              pPath, pXLSX, "STORE4", pAppend = TRUE )
+dtPLANT[nchar(G1LGSTNO) > 3, G1LGSTNO:= substr(G1LGSTNO, 2, 4)]
+
+l_G1LGSTNO <- unique(dtDATA$G1LGSTNO)
+dtTMP11    <- data.frame(DIFF = setdiff(l_G1LGSTNO      , dtPLANT$G1LGSTNO))  # In sales but not in master data
+dtTMP12    <- data.frame(DIFF = setdiff(dtPLANT$G1LGSTNO, l_G1LGSTNO))        # In master data but not in Sales
+
+dtTMP03 <- dtPLANT[!(G1LGSTNO %in% l_G1LGSTNO)]
+fWriteToSheet(dtTMP03, 
+              pPath, pXLSX, "WERKS_WO_SLS2", pAppend = TRUE )
+
+dtPLANT <- dtPLANT[G1LGSTNO %in% l_G1LGSTNO]
+
+# setnames(dtADRC, "ADDRNUMBER", "ADRNR")
+# 
+# dtWERKS  <- merge(dtT001W[ , .(ADRNR, WERKS, VKORG, VTWEG, VLFKZ)], 
+#                   dtADRC[  , .(ADRNR, SORT2)],
+#                   all.x = TRUE, by = "ADRNR")
 
 # Select only NL stores
-dtWERKS  <- dtWERKS[substr(VKORG, 1, 2) %in% c("GB", "IE")]
+# dtWERKS  <- dtWERKS[substr(VKORG, 1, 2) %in% c("GB", "IE")]
+# 
+# # Remove stores which are not Mapped
+# dtTMP01  <- dtWERKS[ is.na(SORT2)][, SORT2:= NULL]
+# 
+# if(nrow(dtTMP01) > 0){
+#   fWriteToSheet(dtTMP01, 
+#                 pPath, pXLSX,  "WERKS_NO_SORT2", pAppend = TRUE )}
+# 
+# dtWERKS  <- dtWERKS[!is.na(SORT2)] 
+# 
+# setnames(dtWERKS, c("SORT2"), c("LWRKS"))
+# 
+# # Quality check on Duplicates
+# dtWERKS  <- dtWERKS[, DUP:= duplicated(dtWERKS, by = "LWRKS")]
+# 
+# dtTMP02  <- copy(dtWERKS)
+# dtTMP02  <- dtTMP02[, DUP:= any(DUP)          , by = "LWRKS" ]
+# dtTMP02  <- dtTMP02[DUP == TRUE ]
+# 
+# if(nrow(dtTMP02) > 0){
+#   fWriteToSheet(dtTMP02, 
+#                 pPath, pXLSX, "WERKS_DUP", pAppend = TRUE )
+#   fWriteToSheet(dtWERKS[DUP == TRUE], 
+#                 pPath, pXLSX, "LWRKS_DEL", pAppend = TRUE )
+#   }
+# 
+# dtWERKS  <- dtWERKS[DUP == FALSE][, DUP:=NULL]
+# 
+# # stores With Visitor counter details
+# dtWERKS <- dtWERKS[LWRKS %in% unique(dtDATA$LWRKS)]
 
-# Remove stores which are not Mapped
-dtTMP01  <- dtWERKS[ is.na(SORT2)][, SORT2:= NULL]
+# dtWERKS <- merge(data.table(LWRKS = unique(dtDATA$LWRKS)),
+#                  dtWERKS[, .(LWRKS, WERKS)],
+#                  all.x = TRUE, by = "LWRKS")
+# 
+# # Introduce dummy stores for closed stores which are not in iSYnergy
+# dtCWRKS <- dtWERKS[is.na(WERKS)]
+# dtCWRKS <- dtCWRKS[, WERKS:= paste0(pLGCINDC, 
+#                                     str_pad(1:nrow(dtCWRKS), 3, pad ="0"))]
+# 
+# dtWERKS <- rbind(dtWERKS[!is.na(WERKS)],
+#                  dtCWRKS)
 
-if(nrow(dtTMP01) > 0){
-  fWriteToSheet(dtTMP01, 
-                pPath, pXLSX,  "WERKS_NO_SORT2", pAppend = TRUE )}
-
-dtWERKS  <- dtWERKS[!is.na(SORT2)] 
-
-setnames(dtWERKS, c("SORT2"), c("LWRKS"))
-
-# Quality check on Duplicates
-dtWERKS  <- dtWERKS[, DUP:= duplicated(dtWERKS, by = "LWRKS")]
-
-dtTMP02  <- copy(dtWERKS)
-dtTMP02  <- dtTMP02[, DUP:= any(DUP)          , by = "LWRKS" ]
-dtTMP02  <- dtTMP02[DUP == TRUE ]
-
-if(nrow(dtTMP02) > 0){
-  fWriteToSheet(dtTMP02, 
-                pPath, pXLSX, "WERKS_DUP", pAppend = TRUE )
-  fWriteToSheet(dtWERKS[DUP == TRUE], 
-                pPath, pXLSX, "LWRKS_DEL", pAppend = TRUE )
-  }
-
-dtWERKS  <- dtWERKS[DUP == FALSE][, DUP:=NULL]
-
-# stores With Visitor counter details
-dtWERKS <- dtWERKS[LWRKS %in% unique(dtDATA$LWRKS)]
-
-dtWERKS <- merge(data.table(LWRKS = unique(dtDATA$LWRKS)),
-                 dtWERKS[, .(LWRKS, WERKS)],
-                 all.x = TRUE, by = "LWRKS")
-
-# Introduce dummy stores for closed stores which are not in iSYnergy
-dtCWRKS <- dtWERKS[is.na(WERKS)]
-dtCWRKS <- dtCWRKS[, WERKS:= paste0(pLGCINDC, 
-                                    str_pad(1:nrow(dtCWRKS), 3, pad ="0"))]
-
-dtWERKS <- rbind(dtWERKS[!is.na(WERKS)],
-                 dtCWRKS)
-
-dtDATA  <- merge(dtWERKS[, .(LWRKS, WERKS)], 
+dtDATA  <- merge(dtPLANT[, .(G1LGSTNO, PLANT)], 
                  dtDATA, 
-                 all.y = TRUE, by = "LWRKS")
+                 all.y = TRUE, by = "G1LGSTNO")
+
+# dtDATA  <- merge(dtWERKS[, .(LWRKS, WERKS)], 
+#                  dtDATA, 
+#                  all.y = TRUE, by = "LWRKS")
 
 ```
 
@@ -196,7 +234,7 @@ dtDATA  <- merge(dtWERKS[, .(LWRKS, WERKS)],
 
 
 dtDATA <- dtDATA[,
-                 .(RECORDMODE, WERKS, CALDAY, REGHR,
+                 .(RECORDMODE, PLANT, CALDAY, REGHR,
                    IN1       , OUT1 , IN2   , OUT2 )]
 
 write.table(dtDATA, file = file.path("c:", "FTP", "VEUK_KLNTTLR.csv"),

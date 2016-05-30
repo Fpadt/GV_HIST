@@ -1,0 +1,190 @@
+---
+title: "Legacy Sales - GrandVision Benelux - "
+author: "F.J.Padt"
+date: "`r Sys.Date()`"
+output: 
+   pdf_document:
+    toc:             true
+    toc_depth:       2
+    number_sections: true
+    fig_caption:     true
+    fig_crop:        true
+    highlight:       tango    
+---
+
+\newpage
+![Logo](http://www.grandvision.com/img/logoGV.png) 
+
+```{r RSetup, echo=FALSE, eval=TRUE, cache=FALSE, results='hide'}
+
+source('../QAR/00_RProj/00_Global/iSynGeneral.R')
+
+# Data Settings
+fECHO    <- FALSE
+fEVAL    <- TRUE
+fRESULTS <- 'hide' 
+
+# SAP systems to use
+pECC_SYST <- "RP1"
+pECC_CLNT <- "300"
+pBI_SYST  <- "BP1" 
+pBI_CLNT  <- "300"
+pLGCINDC  <- "C"
+
+# Data Settings
+pOPCO     <- "GVBNL"
+pROWS     <- 1000
+pSMALL    <- 1000
+pEXP      <- FALSE
+pPART     <- ""
+pFILE     <- paste(  pOPCO, "_KLNTTLR" , pBI_SYST,      pPART, sep="_") 
+pSRCF     <- paste0("GVBNL"       , "_", pBI_SYST, "_", pPART, ".csv")
+pEXPORT   <- paste0("POS_HISTORY", "_",  pBI_SYST, "_", pPART, ".csv") 
+pPath     <- "./60_Results" 
+pXLSX     <- paste0(pOPCO, "_KLNTTLR") 
+
+# Open Excel for storing results
+if(file.exists(paste0(pPath, "/", pXLSX, ".xlsx")) == TRUE){
+   file.remove(paste0(pPath, "/", pXLSX, ".xlsx"))
+}
+
+fWriteToSheet(data.frame(ECCSYST = pECC_SYST, 
+                         ECCCLNT = pECC_CLNT,
+                         BI_SYST = pBI_SYST ,
+                         BI_CLNT = pBI_CLNT), 
+              pPath, pXLSX, "PARAM"   , pAppend = FALSE )
+```
+
+
+```{r ReadRawData, echo=fECHO, eval=fEVAL}
+
+dtPLANT     <- fGetEXPTable(pTable  = "#BI0#PPLANT",
+                            pKey    = "PLANT",
+                            pSystID = pBI_SYST, pClient = "300")
+dtPLANT     <- dtPLANT[PLANTCAT == "A" & !(substr(PLANT, 1, 1) %in% c("Y", "Z"))
+                       ][, `:=`(PLANTCAT = NULL, SYSTID = NULL)]
+
+# Remove the "/BIC/" prefix
+setnames(dtMATERIAL, gsub("^/BIC/", "", colnames(dtMATERIAL)))
+# setnames(dtPLANT, 
+#          c("/BIC/G1LGSTNO", "/BIC/G1SITPROF", "/BIC/G1RSALORG", "/BIC/G1STFLG"), 
+#          c("G1LGSTNO"     , "G1SITPROF"     , "G1RSALORG"     , "G1STFLG"))
+
+dtPLANT <- dtPLANT[, CLOSED:= substr(PLANT,1,1) == "C" | RT_LCLDAT != "00000000"]
+
+dtPLANTT    <- fread(input = "./RAW_DATA/GVBNL_PLANTT.csv", sep = ";",
+                     colClasses = "character", stringsAsFactors = FALSE)
+
+dtRSDSSEGFD <- fGetEXPTable(pTable = "RSDSSEGFD",
+                            pSystID = pBI_SYST, pClient = pBI_CLNT)
+
+dtDATA     <- fread(file.path(".", "RAW_DATA", "IDLKlantenteller.csv"),  
+                     sep = ";", nrows = -1L, colClasses="character") 
+
+setnames(
+  dtDATA,
+#   c("store"   , "datum" , "tijd"  ,
+#     "in1"     , "uit1"  , "in2"   , "uit2"),
+  c("G1LGSTNO", "CALDAY", "REGHR" , 
+    "IN1"     , "OUT1"  , "IN2"   , "OUT2"))
+
+
+```
+
+# Historical Data #
+
+The historical data for `r pOPCO` visitor is extracted from ...
+as one big data set (by Jaap Hinke). 
+
+
+From:    `r min(dtDATA$DATE)` 
+To:      `r max(dtDATA$DATE)`
+Records: `r nrow(dtDATA)`
+
+## Source Data 
+
+Below the structure of the source data and the number of records is displayed
+
+```{r displayDetailMean, echo=fECHO, eval=fEVAL, results='markup'}
+
+str(dtDATA)
+head(dtDATA)
+
+# fWriteToSheet(as.data.frame(str(dtDATA)), pFILE, "Structure", pAppend = TRUE)
+fWriteToSheet(head(dtDATA[1:10]), pPath, pXLSX, "DATA"   , pAppend = TRUE)
+```
+
+```{r ChangeDataTypes, echo=fECHO, eval=fEVAL, results=fRESULTS}
+# Change data Types and set NA to 0
+system.time(
+  dtDATA <- dtDATA[, `:=`(
+    RECORDMODE = "N",
+    G1LGSTNO   = str_pad(G1LGSTNO, 3, pad ="0"),
+    REGHR      = paste0(gsub(pattern = ":", replacement = "", REGHR), "00"),
+    IN1        = as.integer(IN1),
+    OUT1       = as.integer(OUT1),
+    IN2        = as.integer(IN2),
+    OUT2       = as.integer(OUT2)) ])
+
+gc()
+```
+
+```{r LegacyStoreToSAP, echo=fECHO, results=fRESULTS}
+
+# PLANT
+dtPLANT <- dtPLANT[SALESORG %in% c("NL01", "BE01", "NL02", "BE02", "NL14", "NL07") ]
+setkey(dtPLANT, PLANT)
+
+dtPLANT <- dtPLANT[substr(PLANT, 1, 1) != "Z"]
+dtPLANT <- dtPLANT[, CHK:= substr(G1LGSTNO, nchar(G1LGSTNO)-2, nchar(G1LGSTNO))]
+dtPLANT <- dtPLANTT[dtPLANT, on = c("PLANT", "CHK"), .(PLANT, G1LGSTNO, CHK, FROM)]
+dtPLANT <- dtPLANT[, `:=`(G1LGSTNO = CHK, CHK = NULL)]
+dtPLANT <- dtPLANT[is.na(FROM), FROM:= "10000101"]
+
+# Quality check on duplicate Legacy Stores
+dtTMP02  <- copy(dtPLANT)
+dtTMP02  <- dtTMP02[, DUP:= duplicated(dtTMP02, by = "G1LGSTNO")]
+dtTMP02  <- dtTMP02[, DUP:= any(DUP)          , by = "G1LGSTNO" ]
+dtTMP02  <- dtTMP02[DUP == TRUE ]
+
+fWriteToSheet(dtTMP02, 
+              pPath, pXLSX, "PLANT_DUP", pAppend = TRUE )
+
+# check If any closed stores missing
+dtTMP03 <- data.table(CLOSED_MISSING   = setdiff(unique(dtDATA$G1LGSTNO), dtPLANT$G1LGSTNO))
+fWriteToSheet(dtTMP02, 
+              pPath, pXLSX, "CLOSED_MISSING", pAppend = TRUE )
+
+# check Site without FootFall
+dtTMP04 <- data.table(SITE_WO_FOOTFALL = setdiff(dtPLANT$G1LGSTNO       , unique(dtDATA$G1LGSTNO)))
+fWriteToSheet(dtTMP02, 
+              pPath, pXLSX, "SITE_WO_FOOTFALL", pAppend = TRUE )
+
+# Map the data Of the Legacy Stores
+setnames(dtPLANT, "FROM", "CALDAY")
+system.time(
+  dtDATA <- dtPLANT[dtDATA, roll = TRUE, rollends = TRUE, 
+               on = c("G1LGSTNO", "CALDAY")])
+
+rm(dtTMP02, dtTMP03, dtTMP04, dtPLANT, dtPLANTT)
+
+```
+
+
+```{r EXPORT, echo=fECHO, eval=FALSE}
+
+dtDS <- dtRSDSSEGFD[DATASOURCE == "G1_DS_VISITORS_TD" & OBJVERS == "A"]
+setkey(dtDS, "POSIT")
+
+dtDS <- dtDS[ , .(POSIT, FIELDNM, DATATYPE, DECIMALS, IOBJNM)]
+
+dtDATA <- dtDATA[, dtDS$FIELDNM, with = FALSE]
+
+write.table(dtDATA, file = file.path("c:", "FTP", "GVBNL_KLNTTLR.csv"),
+            quote = TRUE     , sep = ";", na = "", dec = ".",             
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+
+rm(dtDS, dtRSDSSEGFD)
+
+
+```

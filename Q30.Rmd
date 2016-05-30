@@ -60,18 +60,18 @@ fWriteToSheet(data.frame(ECCSYST = pECC_SYST,
 ```{r ReadRawData, echo=fECHO, eval=fEVAL, results=fRESULTS}
 
 # Material
-dtMEAN       <- fGetSAPTable(pTable  = "MEAN", pKey = c("MATNR", "MEINH"),
+dtMEAN       <- fGetEXPTable(pTable  = "MEAN", pKey = c("MATNR", "MEINH"),
                              pSystID = "RP1", pClient = "300")
 dtMEAN       <- dtMEAN[, MATNR:= as.character(MATNR)]
 
 # Site Related
-dtADRC       <- fGetSAPTable(pTable  = "ADRC", 
-                             pSystID = "RP1", pClient = "300")
+# dtADRC       <- fGetEXPTable(pTable  = "ADRC", 
+#                              pSystID = "RP1", pClient = "300")
+# 
+# dtT001W      <- fGetEXPTable(pTable  = "T001W", pKey = c("WERKS"),
+#                              pSystID = "RP1", pClient = "300")
 
-dtT001W      <- fGetSAPTable(pTable  = "T001W", pKey = c("WERKS"),
-                             pSystID = "RP1", pClient = "300")
-
-dtPLANT      <- fGetSAPTable(pTable  = "#BI0#PPLANT",
+dtPLANT      <- fGetEXPTable(pTable  = "#BI0#PPLANT",
                              pKey    = "PLANT",
                              pSystID = pBI_SYST, pClient = "300")
 
@@ -79,17 +79,19 @@ setnames(dtPLANT, "/BIC/G1LGSTNO", "G1LGSTNO")
 ### Temporary deletion of Legacy closed
 # dtPLANT     <- dtPLANT[(!substr(PLANT, 1, 1) %in% c("H", "C")),]
 
-dtSDP_VE    <- fread(file.path(".", "RAW_DATA", "SDP_VE.csv"), 
-                sep=";")
-setkey(dtSDP_VE, "WERKS")
+# dtSDP_VE    <- fread(file.path(".", "RAW_DATA", "SDP_VE.csv"), 
+#                 sep=";")
+# setkey(dtSDP_VE, "WERKS")
+
+dtLMTART <- fread("../grandvision2/data/raw/MARA-MTART.txt", colClasses = "character")
 
 # DataSource related
-dtRSDSSEGFD  <- fGetSAPTable(pTable  = "RSDSSEGFD", 
+dtRSDSSEGFD  <- fGetEXPTable(pTable  = "RSDSSEGFD", 
                              pKey    = c("DATASOURCE", "POSIT"),
                              pSystID = pBI_SYST, pClient = "300")
 dtRSDSSEGFD  <- dtRSDSSEGFD[DATASOURCE == "G1_DS_PA_HIST_FLAT_FILE" ] #G0_DS_LEGACY_SLS_TD
 
-dtRSDSSEGFDT <- fGetSAPTable(pTable  = "RSDSSEGFDT", 
+dtRSDSSEGFDT <- fGetEXPTable(pTable  = "RSDSSEGFDT", 
                              pKey    = c("DATASOURCE", "POSIT"), 
                              pSystID = pBI_SYST, pClient = "300")
 dtRSDSSEGFDT <- dtRSDSSEGFDT[DATASOURCE == "G1_DS_PA_HIST_FLAT_FILE" & LANGU == "E" ]
@@ -102,7 +104,7 @@ dtVBRK <- dtVBRK[FKDAT < "20150601",             # Cut-off and reduce size by re
                  .(VBELN, FKDAT, FKART, STWAE)]  # unnecessary columns
 
 # Only keep FKART = FP
-dtVBRK <- dtVBRK[FKART == "FP" | FKART == "IV"]
+dtVBRK <- dtVBRK[FKART == "FP"]
 
 # Load Legacy Billing item and Combine
 dtVBRP <- fread(file.path(".", "RAW_DATA", "ZZ_L30_VBRP.txt"), 
@@ -117,6 +119,14 @@ dtVBRP <- dtVBRP[FBUDA < "20150601",
 
 #Delete records which relate to DC 
 dtVBRP <- dtVBRP[!(WERKS %in% c("9900", "9999"))]
+
+#Delete Bonus Point Materials
+dtVBRP <- dtVBRP[!(MATNR %in% c("000000000000111788", "000000000000111836", 
+                                "000000000000111837", "000000000000112813", 
+                                "000000000000112814", "000000000000136186", 
+                                "000000000000136187", "000000000000139627", 
+                                "000000000000139628", "000000000000139629", 
+                                "000000000000139630", "000000000000139631"))]
 
 l_months <- sort(unique(substr(dtVBRP$FBUDA, 1, 6)))
 dtMonths <- dtVBRP[, .N, by=.(substr(dtVBRP$FBUDA, 1, 6))]
@@ -241,20 +251,30 @@ dtDATA <- dtDATA[, `:=`(
   G1DISCIT       =                                    0,  # not maintained in VEUK system
   ABRVW          =                                 NULL,  # not needed anymore
   FBUDA          =                                 NULL,   # not needed anymore 
-  G1NTSLINT      = 0 ,
-  G1LISLINT      = 0
+  G1NTSLINT      =                        NETWR + MWSBP,
+  G1LISLINT      =                        NETWR + MWSBP
    )]
 
 # Apply Discount Logic
 dtDSCD <- fread("./RAW_DATA/DSCD.txt", sep = ";"  )
 dtDSCD <- dtDSCD[, MATNR:= gsub("(^|[^0-9])0+", "\\1", MATNR, perl = TRUE)]
 
-dtDATA[MATNR %in% dtDSCD$MATNR, `:=`(G1DISCIT  = -NETWR, 
+load("~/RW/GV_HIST/GB_TILL_LINE_251.RData")
+
+dtDATA[MATNR %in% dtDSCD$MATNR, `:=`(G1DISCIT  = -(NETWR + MWSBP), 
                                      NETWR     = 0,
                                      MWSBP     = -MWSBP,
                                      G1NTSLINT = 0,
-                                     G1LISLINT = 0   )]
+                                     G1LISLINT = 0,
+                                     QUANTITY  = -QUANTITY)]
 
+# dtTEST <- dtDATA[MATNR == "132224"]
+# dtTEST[MATNR %in% dtDSCD$MATNR, `:=`(G1DISCIT  = -(NETWR + MWSBP), 
+#                                      NETWR     = 0,
+#                                      MWSBP     = -MWSBP,
+#                                      G1NTSLINT = 0,
+#                                      G1LISLINT = 0,
+#                                      QUANTITY  = -QUANTITY)]
 # setnames(dtDSCD, 
 #          c("MATNR", "EAN11"),
 #          c("EAN11", "LEAN11"))
@@ -273,7 +293,7 @@ rm(dtTRXFLG)
 # add the iSynergy Store next to the legacy store
 
 dtPLANT <- dtPLANT[SALESORG %in% c("", "GB13", "GB07", "IE11")]
-dtPLANT <- dtPLANT[!PLANT %in% c("0000", "")]
+dtPLANT <- dtPLANT[!PLANT   %in% c("0000", "")]
 
 # Allign with ECC Logic
 dtPLANT <- dtPLANT[nchar(G1LGSTNO) != 4 & 
@@ -399,9 +419,7 @@ Following Stores could not be mapped and are removed from the store Master Data:
 dtTMP01
 dtTMP02
 
-rm(dtWERKS , dtPLANT , dtADRC , dtT001W, 
-   dtTMP01 , dtTMP02 , dtTMP03, dtTMP04, 
-   dtSDP_VE, dtSDP_01, l_DUMMIES_USED)
+rm(dtPLANT )
 gc()
 ```
 
@@ -425,12 +443,451 @@ Next the related SAP article will be added to teh historical data if exisitng.
 For this the mapping table MEAN is used from client 250 for EANTP = Z2. 
 In case no SAp article exist the field will be empty. 
 
+
+```{r MARAQ}
+# Open Excel for storing results
+  pPath     <- "../GV_HIST/60_Results"  
+  pXLSX     <- "LEG_MAPPING"
+if(file.exists(paste0(pPath, "/", pXLSX, ".xlsx")) == TRUE){
+   file.remove(paste0(pPath, "/", pXLSX, ".xlsx"))
+}
+
+# rm(list=ls())  
+
+source('../grandvision2/lib/functions.R')
+
+pXLSX     <- "LEG_MAPPING"
+
+dtVBRP_MATNR <- data.table(MATNR = unique(dtDATA$MATNR))
+dtVBRP_MATNR[, MATNR:= str_pad(MATNR, width =18, pad = "0") ]
+
+# Dummies without MARA
+dtMTNRA <- data.table(LMTNR = setdiff(dtVBRP_MATNR$MATNR, dtLMTART$MATNR), EANTP = "AA")
+dtMTNRA <- dtMTNRA[, MATNR:= paste0("DGB", substr(LMTNR, 4,18))]
+setcolorder(dtMTNRA, c("MATNR", "LMTNR", "EANTP"))
+
+dtMATNR <- dtMEAN[MEINH == "ST" & 
+                  EANTP == "Z2" &
+                  EAN11 != "DUPLICATE", 
+                  .(MATNR, EAN11)]
+vMAP        <- c("MATNR_I", "MATNR")
+setnames(dtMATNR, c("MATNR", "EAN11"), vMAP)
+dtMATNR[, MATNR:= str_pad(MATNR, width =  18, pad = "0")]
+
+#MARAQ
+dtMARAQ  <- fGetOHDTable("MARAQ", pAddHeader = FALSE) 
+lstMARAQ <- fTableOverview(dtMARAQ)
+# View(lstMARAQ[["dtRATIO"]])
+# write.table(lstMARAQ[["dtRATIO"]], file = "MARAQ.csv", sep = ";", row.names = FALSE, col.names = TRUE)
+# View(dtMATSALES[1:pROWS, ])
+
+# Only SOLD Articles
+dtMARAQ <- dtMARAQ[MATNR %in% dtVBRP_MATNR$MATNR]
+
+# Add iSynergy Article
+dtMARAQ <- merge(dtMARAQ,
+                 dtMATNR,
+                 by = "MATNR", all.x= TRUE)
+
+# Add MTART
+dtMAP <- fread("../grandvision2/data/raw/MAP_MTART.csv")
+dtMAP <- fRemoveDuplicates(dtMAP, 
+                           c("MTART", "ITEM_TYPE"))[["UNIQUES"]]
+dtMAP <- dtMAP[, ITEM_TYPE:= str_pad(string = ITEM_TYPE, width = 2, pad = "0")]
+dtMARAQ     <- merge(dtMARAQ, dtMAP, by = c("MTART", "ITEM_TYPE"), 
+                     all.x = TRUE)
+vMAP        <- c(vMAP, "ITEM_TYPE", "MTART", "MTART_I") 
+
+# Add MATKL mapped by STOCK_CATEGORY
+dtMAP <- fread("../grandvision2/data/raw/STOCK_CATEGORY-MATKL.csv", colClasses = "character")
+setnames(dtMAP, "MATKL", "MATKL_I")
+nrow(dtMAP)
+dtMAP <- fRemoveDuplicates(dtMAP, 
+                           c("STOCK_CATEGORY"))[["UNIQUES"]]
+nrow(dtMAP)
+# dtMAP <- dtMAP[, ITEM_TYPE:= str_pad(string = ITEM_TYPE, width = 2, pad = "0")]
+dtMARAQ     <- merge(dtMARAQ, dtMAP, by = "STOCK_CATEGORY", 
+                     all.x = TRUE)
+vMAP        <- c(vMAP, "STOCK_CATEGORY", "MATKL_I") 
+
+# Add MATKL mapped by MATNR
+dtMAP <- fread("../grandvision2/data/raw/MATNR-MATKL.csv", colClasses = "character")
+setnames(dtMAP, "MATKL", "MATKL_I2")
+nrow(dtMAP)
+dtMAP <- fRemoveDuplicates(dtMAP, c("MATNR"))[["UNIQUES"]]
+nrow(dtMAP)
+dtMAP <- dtMAP[, MATNR:= str_pad(string = MATNR, width = 18, pad = "0")]
+dtMARAQ     <- merge(dtMARAQ, dtMAP, by = "MATNR", 
+                     all.x = TRUE)
+dtMARAQ <- dtMARAQ[!is.na(MATKL_I2), `:=` (MATKL_I = MATKL_I2)]
+dtMARAQ[, MATKL_I2:= NULL]
+
+# View(dtMARAQ[!is.na(MATKL_I2),])
+
+# add ZZBRANDID
+vMFLD <- "BRAND"
+dtMAP <- fread("../grandvision2/data/raw/BRAND_ZZBRANDID.csv", colClasses = "character")
+# setnames(dtMAP, "ZzBRANDID", "MATKL_I2")
+nrow(dtMAP)
+dtMAP <- fRemoveDuplicates(dtMAP, vMFLD)[["UNIQUES"]]
+nrow(dtMAP)
+# dtMAP <- dtMAP[, MATNR:= str_pad(string = MATNR, width = 18, pad = "0")]
+dtMARAQ     <- merge(dtMARAQ, dtMAP, by = vMFLD, 
+                     all.x = TRUE)
+vMAP        <- c(vMAP, vMFLD, "ZZBRANDID_I" ) 
+# View(dtMARAQ[is.na(MATNR_I), 
+#              vMAP, with = FALSE])
+# setdiff(dtMAP$BRAND, unique(dtMARAQ$BRAND))
+# setdiff(unique(dtMARAQ$BRAND), dtMAP$BRAND) # in MARAQ but not in MAP
+
+# Add ZZCOLOR_COLOUR
+vMFLD <- "COLOUR_ID"
+dtMAP <- fread("../grandvision2/data/raw/COLOUR_ZZCOLOR.csv", colClasses = "character")
+setnames(dtMAP, c("COLOUR", "ZZOLOR"), c("COLOUR_ID", "ZZCOLOR"))
+dtMPC <- fread("../grandvision2/data/raw/ZIF_COLOUR.txt", colClasses = "character")
+dtMPC <- dtMPC[, .(ITEM_TYPE, COLOUR_ID, COLOUR)]
+dtMARAQ <- merge(dtMARAQ, dtMPC, by = c("ITEM_TYPE", "COLOUR"), all.x = TRUE)
+# only items "01" "02" "05" "10"
+unique(dtMPC$ITEM_TYPE)
+
+nrow(dtMAP)
+dtMAP <- fRemoveDuplicates(dtMAP, vMFLD)[["UNIQUES"]]
+nrow(dtMAP)
+# dtMAP <- dtMAP[, MATNR:= str_pad(string = MATNR, width = 18, pad = "0")]
+dtMARAQ     <- merge(dtMARAQ, dtMAP, by = vMFLD, 
+                     all.x = TRUE)
+vMAP        <- c(vMAP, vMFLD, "ZZCOLOR" ) 
+# View(dtMARAQ[is.na(MATNR_I), 
+#              vMAP, with = FALSE])
+
+#GENDER
+vMFLD <- "GENDER"
+dtMAP <- fread("../grandvision2/data/raw/GENDER_MVKEZZTGTGRP.csv", colClasses = "character")
+# setnames(dtMAP, "ZzBRANDID", "MATKL_I2")
+nrow(dtMAP)
+dtMAP <- fRemoveDuplicates(dtMAP, vMFLD)[["UNIQUES"]]
+nrow(dtMAP)
+# dtMAP <- dtMAP[, MATNR:= str_pad(string = MATNR, width = 18, pad = "0")]
+dtMARAQ     <- merge(dtMARAQ, dtMAP, by = c("MTART_I", "GENDER"), 
+                     all.x = TRUE)
+vMAP        <- c(vMAP, vMFLD, "ZZTGTGRP" ) 
+# View(dtMARAQ[is.na(MATNR_I), 
+#              vMAP, with = FALSE])
+
+##PLGTP
+vMFLD <- "PLGTP"
+dtMAP <- fread("../grandvision2/data/raw/PLGTP_PLGTP_I.csv", colClasses = "character")
+# setnames(dtMAP, "ZzBRANDID", "MATKL_I2")
+nrow(dtMAP)
+dtMAP <- fRemoveDuplicates(dtMAP, vMFLD)[["UNIQUES"]]
+nrow(dtMAP)
+# dtMAP <- dtMAP[, MATNR:= str_pad(string = MATNR, width = 18, pad = "0")]
+dtMARAQ     <- merge(dtMARAQ, dtMAP, by = c("MTART_I", "PLGTP"), 
+                     all.x = TRUE)
+vMAP        <- c(vMAP, vMFLD, "PLGTP_I" ) 
+# View(dtMARAQ[is.na(MATNR_I), 
+#              vMAP, with = FALSE])
+
+
+
+#PACKS
+dtPACK <- fread("../grandvision2/data/raw/MARA-MTART.txt", colClasses = "character")
+dtPACK <- dtPACK[MTART == "PACK", .(MATNR)]
+setnames(dtPACK, "MATNR", "LMTNR")
+dtPACK <- dtPACK[, `:=`(MATNR = paste0("DGB", str_pad("PACK", width = 15, pad = "0")),
+                        EANTP = "PACK",
+                        LMTNR2 = as.character(as.numeric(LMTNR)))]
+dtPACK <- dtPACK[!is.na(LMTNR2), LMTNR:= LMTNR2][, LMTNR2:=NULL]
+setcolorder(dtPACK, c("MATNR", "LMTNR", "EANTP"))
+
+# Feedback MaRK
+# Add Merch Hierarchy
+dtMATERIAL  <- fGetOHDTable("MATERIAL" , pAddHeader = TRUE)
+# dtMATERIAL  <- dtMATERIAL[MATERIAL %in% dtMARA$MATNR]
+
+dtWGH <- dtMATERIAL[, .N, by = .(RPA_WGH1, RPA_WGH2, RPA_WGH3, MATL_GROUP)]
+dtWGH[, N:=NULL]
+dtMCLM <- fread("../grandvision2/data/raw/MC_LEGMAP.csv", colClasses = "character")
+
+dtMCLM <- merge(dtMCLM, dtWGH, by = "MATL_GROUP", all.x = TRUE)
+dtMCLM <- merge(dtMARAQ[, .(MATNR, PLGTP, PLGTP_I, GENDER, ZZTGTGRP)], 
+                dtMCLM, by = "MATNR", all.y = TRUE)
+
+# add ZZBRANDID
+# vMFLD <- "BRAND"
+dtMAP <- fread("../grandvision2/data/raw/BRAND_ZZBRANDID.csv", colClasses = "character")
+dtMAP <- dtMAP[, ZZBRANDID_I:= str_pad(string = ZZBRANDID_I, width = 4, pad = "0")]
+setnames(dtMAP, c("ZZBRANDID_I", "ZZBRANDTP_I"), 
+                c("RF_BNDID"   , "G1BRNDTY"))
+dtMAP <- dtMAP[, BRAND:=NULL]
+dtMAP <- dtMAP[, .N, by = .(RF_BNDID, G1BRNDTY)][, N:=NULL]
+# setnames(dtMAP, "ZzBRANDID", "MATKL_I2")
+# nrow(dtMAP)
+# dtMAP <- fRemoveDuplicates(dtMAP, vMFLD)[["UNIQUES"]]
+# nrow(dtMAP)
+# dtMAP <- dtMAP[, MATNR:= str_pad(string = MATNR, width = 18, pad = "0")]
+dtMCLM     <- merge(dtMCLM, dtMAP[, .(RF_BNDID, G1BRNDTY)], 
+                    by = "RF_BNDID", all.x = TRUE)
+# vMAP        <- c(vMAP, vMFLD, "RF_BNDID" ) 
+
+dtDUMMY <- dtMCLM[, DUMMY:= .GRP, 
+                  by = .(MATL_TYPE, RPA_WGH1, RPA_WGH2, RPA_WGH3, MATL_GROUP, 
+                         RF_BNDID , G1BRNDTY, G1COLOR , PLGTP   , PLGTP_I , GENDER, ZZTGTGRP, 
+                         G1REFINX1, G1LENCTY, G1TRANS , G1POLAR) ]
+dtDUMMY[, DUMMY:= paste0("DGB", str_pad(DUMMY,width = 15, pad="0"))]
+setcolorder(dtDUMMY, 
+            c("DUMMY"    , "MATNR"   , "MATL_TYPE", "RPA_WGH1", "RPA_WGH2", "RPA_WGH3", "MATL_GROUP", 
+              "RF_BNDID" , "G1BRNDTY", "G1COLOR" , "PLGTP"    , "PLGTP_I" , "GENDER", "ZZTGTGRP", 
+              "G1REFINX1", "G1LENCTY", "G1TRANS"  , "G1POLAR"))
+setkey(dtDUMMY, "DUMMY")
+
+# fWriteToSheet(dtDUMMY, 
+#               pPath, 
+#               pXLSX, 
+#               "MC_MAP", pAppend = TRUE)
+# 
+
+dtDUMMY <- rbind(dtDUMMY,
+                 data.table(
+                   DUMMY = paste0("DGB", str_pad(string = "2070", width = 15, pad= "0")), 
+                   MATNR = NA, 
+                   MATL_TYPE = NA, 
+                   RPA_WGH1 = NA, RPA_WGH2 = NA, RPA_WGH3 = NA, MATL_GROUP =NA, 
+                   RF_BNDID = NA, G1BRNDTY = NA, G1COLOR = NA, PLGTP =NA, PLGTP_I = NA, GENDER = NA, ZZTGTGRP =NA, 
+                   G1REFINX1 =NA, G1LENCTY = NA, G1TRANS = NA  , G1POLAR = NA
+                 ))
+dtDUMMY <- rbind(dtDUMMY,
+                 data.table(
+                   DUMMY = paste0("DGB", str_pad(string = "2071", width = 15, pad= "0")), 
+                   MATNR = NA, 
+                   MATL_TYPE = NA, 
+                   RPA_WGH1 = NA, RPA_WGH2 = NA, RPA_WGH3 = NA, MATL_GROUP =NA, 
+                   RF_BNDID = NA, G1BRNDTY = NA, G1COLOR = NA, PLGTP =NA, PLGTP_I = NA, GENDER = NA, ZZTGTGRP =NA, 
+                   G1REFINX1 =NA, G1LENCTY = NA, G1TRANS = NA  , G1POLAR = NA
+                 ))
+dtEXP <- dtDUMMY[, .N, .(DUMMY, MATL_TYPE, RPA_WGH1, RPA_WGH2, RPA_WGH3, MATL_GROUP, 
+                        RF_BNDID , G1BRNDTY, G1COLOR,  
+                        G1REFINX1, G1LENCTY, G1TRANS  , G1POLAR)][, N:=NULL]
+
+write.table(dtEXP, 
+            file = "C:/FTP/0MATERIAL_DUMMY.csv",
+            quote = TRUE     , sep = ";", na = "", dec = ".",             
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+
+# 0MAT_SALES
+dtVKORG <- c("GB13", "IE11")
+dtVTWEG <- c("10")
+
+dtMS <- dtDUMMY[!(is.na(ZZTGTGRP) & is.na(PLGTP_I)), .(DUMMY, ZZTGTGRP, PLGTP_I)]
+dtMS <- dtMS[, .N, .(DUMMY, ZZTGTGRP, PLGTP_I)][, N:=NULL]
+setnames(dtMS, c("ZZTGTGRP", "PLGTP_I"), c("G1TGTGRP1", "RT_PRBAND"))
+setkey(dtMS, "DUMMY")
+  
+dtSD       <- merge(dtVTWEG, dtVKORG           , all = TRUE)
+setnames(dtSD, c("x", "y"), c("DISTR_CHAN", "SALESORG"))
+dtMSD      <- merge(dtSD   , dtMS, all = TRUE)
+
+setcolorder(dtMSD, c("DUMMY", "SALESORG", "DISTR_CHAN", "RT_PRBAND", "G1TGTGRP1"))
+
+write.table(dtMSD, 
+            file = "C:/FTP/0MAT_SALES_DUMMY.csv",
+            quote = TRUE     , sep = ";", na = "", dec = ".",             
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+
+
+# write.table(dtMARAQ[, vMAP, with = FALSE], 
+#             file = "C:/FTP/LMARAQ.csv",
+#             quote = TRUE     , sep = ";", na = "", dec = ".",             
+#             row.names = FALSE, col.names = TRUE, append = FALSE)
+# 
+# write.table(dtVBRP_MATNR, 
+#             file = "C:/FTP/VBRP_MATNR.csv",
+#             quote = TRUE     , sep = ";", na = "", dec = ".",             
+#             row.names = FALSE, col.names = TRUE, append = FALSE)
+
+
+# setdiff(dtMAP$BRAND, unique(dtMARAQ$BRAND))
+# setdiff(unique(dtMARAQ$BRAND), dtMAP$BRAND) # in MARAQ but not in MAP
+dtMEAND <- dtDUMMY[, .(DUMMY, MATNR)]
+dtMEAND <- dtMEAND[, EANTP:= "DM"]
+setnames(dtMEAND, c("DUMMY", "MATNR"), c("MATNR", "LMTNR"))
+dtMEAND[, LMTNR:= as.numeric(LMTNR)]
+dtMTNRA[, LMTNR:= gsub("0000000000", "",x = LMTNR)]
+dtMEAND <- rbind(dtMEAND, dtMTNRA)
+
+dtMEAND <- rbind(dtMEAND, dtPACK)
+
+
+```
+
+#not used
+```{r MVKEQ}
+# Open Excel for storing results
+pPath     <- "../GV_HIST/60_Results"  
+pXLSX     <- "LEG_MVKE"
+if(file.exists(paste0(pPath, "/", pXLSX, ".xlsx")) == TRUE){
+   file.remove(paste0(pPath, "/", pXLSX, ".xlsx"))
+}
+
+rm(list=ls())  
+
+source('../QAR/00_RProj/00_Global/iSynGeneral.R')
+source('./lib/functions.R')
+
+dtVKORG <- c("GB13", "IE11")
+dtVTWEG <- c("10")
+
+load(file="c:/FTP/MATNR.Rdata")
+dtVBRP_MATNR[, MATNR:= str_pad(MATNR, width = 18, pad = "0") ]
+
+dtMEAN       <- fGetEXPTable(pTable  = "MEAN", pKey = c("MATNR", "MEINH"),
+                             pSystID = "RP1", pClient = "300")
+dtMEAN       <- dtMEAN[, MATNR:= as.character(MATNR)]
+  
+dtMATNR <- dtMEAN[MEINH == "ST" & 
+                    EANTP == "Z2" &
+                    EAN11 != "DUPLICATE", 
+                  .(MATNR, EAN11)]
+vMAP        <- c("MATNR_I", "MATNR")
+setnames(dtMATNR, c("MATNR", "EAN11"), vMAP)
+dtMATNR[, MATNR:= str_pad(MATNR, width =  18, pad = "0")]
+
+#MVKEQ
+dtMVKEQ  <- fGetOHDTable("MVKEQ", pAddHeader = FALSE) 
+lstMVKEQ <- fTableOverview(dtMVKEQ)
+View(lstMVKEQ[["dtRATIO"]])
+write.table(lstMVKEQ[["dtRATIO"]], file = "MVKEQ.csv", sep = ";", row.names = FALSE, col.names = TRUE)
+# View(dtMATSALES[1:pROWS, ])
+
+# Only SOLD Articles
+dtMVKEQ <- dtMVKEQ[MATNR %in% dtVBRP_MATNR$MATNR]
+
+# Add iSynergy Article
+dtMVKEQ <- merge(dtMVKEQ,
+                 dtMATNR,
+                 by = "MATNR", all.x= TRUE)
+
+# Add MTART
+dtMAP <- fread("./data/raw/MAP_MTART.csv")
+dtMAP <- fRemoveDuplicates(dtMAP, 
+                           c("MTART", "ITEM_TYPE"))[["UNIQUES"]]
+dtMAP <- dtMAP[, ITEM_TYPE:= str_pad(string = ITEM_TYPE, width = 2, pad = "0")]
+dtMVKEQ     <- merge(dtMVKEQ, dtMAP, by = c("MTART", "ITEM_TYPE"), 
+                     all.x = TRUE)
+vMAP        <- c(vMAP, "ITEM_TYPE", "MTART", "MTART_I") 
+
+# Add MATKL mapped by STOCK_CATEGORY
+dtMAP <- fread("./data/raw/STOCK_CATEGORY-MATKL.csv", colClasses = "character")
+setnames(dtMAP, "MATKL", "MATKL_I")
+nrow(dtMAP)
+dtMAP <- fRemoveDuplicates(dtMAP, 
+                           c("STOCK_CATEGORY"))[["UNIQUES"]]
+nrow(dtMAP)
+# dtMAP <- dtMAP[, ITEM_TYPE:= str_pad(string = ITEM_TYPE, width = 2, pad = "0")]
+dtMVKEQ     <- merge(dtMVKEQ, dtMAP, by = "STOCK_CATEGORY", 
+                     all.x = TRUE)
+vMAP        <- c(vMAP, "STOCK_CATEGORY", "MATKL_I") 
+
+# Add MATKL mapped by MATNR
+dtMAP <- fread("./data/raw/MATNR-MATKL.csv", colClasses = "character")
+setnames(dtMAP, "MATKL", "MATKL_I2")
+nrow(dtMAP)
+dtMAP <- fRemoveDuplicates(dtMAP, c("MATNR"))[["UNIQUES"]]
+nrow(dtMAP)
+dtMAP <- dtMAP[, MATNR:= str_pad(string = MATNR, width = 18, pad = "0")]
+dtMVKEQ     <- merge(dtMVKEQ, dtMAP, by = "MATNR", 
+                     all.x = TRUE)
+dtMVKEQ <- dtMVKEQ[!is.na(MATKL_I2), `:=` (MATKL_I = MATKL_I2)]
+dtMVKEQ[, MATKL_I2:= NULL]
+
+View(dtMVKEQ[!is.na(MATKL_I2),])
+
+# add ZZBRANDID
+vMFLD <- "BRAND"
+dtMAP <- fread("./data/raw/BRAND_ZZBRANDID.csv", colClasses = "character")
+# setnames(dtMAP, "ZzBRANDID", "MATKL_I2")
+nrow(dtMAP)
+dtMAP <- fRemoveDuplicates(dtMAP, vMFLD)[["UNIQUES"]]
+nrow(dtMAP)
+# dtMAP <- dtMAP[, MATNR:= str_pad(string = MATNR, width = 18, pad = "0")]
+dtMVKEQ     <- merge(dtMVKEQ, dtMAP, by = vMFLD, 
+                     all.x = TRUE)
+vMAP        <- c(vMAP, vMFLD, "ZZBRANDID_I" ) 
+View(dtMVKEQ[is.na(MATNR_I), 
+             vMAP, with = FALSE])
+# setdiff(dtMAP$BRAND, unique(dtMVKEQ$BRAND))
+# setdiff(unique(dtMVKEQ$BRAND), dtMAP$BRAND) # in MARAQ but not in MAP
+
+# Add ZZCOLOR_COLOUR
+vMFLD <- "COLOUR_ID"
+dtMAP <- fread("./data/raw/COLOUR_ZZCOLOR.csv", colClasses = "character")
+setnames(dtMAP, c("COLOUR", "ZZOLOR"), c("COLOUR_ID", "ZZCOLOR"))
+dtMPC <- fread("./data/raw/ZIF_COLOUR.txt", colClasses = "character")
+dtMPC <- dtMPC[, .(ITEM_TYPE, COLOUR_ID, COLOUR)]
+dtMVKEQ <- merge(dtMVKEQ, dtMPC, by = c("ITEM_TYPE", "COLOUR"), all.x = TRUE)
+# only items "01" "02" "05" "10"
+unique(dtMPC$ITEM_TYPE)
+
+nrow(dtMAP)
+dtMAP <- fRemoveDuplicates(dtMAP, vMFLD)[["UNIQUES"]]
+nrow(dtMAP)
+# dtMAP <- dtMAP[, MATNR:= str_pad(string = MATNR, width = 18, pad = "0")]
+dtMVKEQ     <- merge(dtMVKEQ, dtMAP, by = vMFLD, 
+                     all.x = TRUE)
+vMAP        <- c(vMAP, vMFLD, "ZZCOLOR" ) 
+View(dtMVKEQ[is.na(MATNR_I), 
+             vMAP, with = FALSE])
+
+dtWGH <- dtMATERIAL[, .N, by = .(RPA_WGH1, RPA_WGH2, RPA_WGH3, MATL_GROUP)]
+dtWGH[, N:=NULL]
+dtMCLM <- fread("./raw_data/MC_LEGMAP.csv", colClasses = "character")
+
+dtMCLM <- merge(dtMCLM, dtWGH, by = "MATL_GROUP", all.x = TRUE)
+
+dtDUMMY <- dtMCLM[, DUMMY:= .GRP, by = .(MATL_TYPE, RF_BNDID, G1COLOR, G1REFINX1, G1LENCTY, G1TRANS, G1POLAR, RPA_WGH1, RPA_WGH2, RPA_WGH3, MATL_GROUP) ]
+dtDUMMY[, DUMMY:= paste0("DGB", str_pad(DUMMY,width = 15, pad="0"))]
+setcolorder(dtDUMMY, 
+            c("DUMMY", "MATNR", "MATL_TYPE", "RF_BNDID", "G1COLOR", "G1REFINX1", "G1LENCTY", "G1TRANS", "G1POLAR", "RPA_WGH1", "RPA_WGH2", "RPA_WGH3", "MATL_GROUP"))
+setkey(dtDUMMY, "DUMMY")
+
+fWriteToSheet(dtDUMMY, 
+              pPath, 
+              pXLSX, 
+              "MC_MAP", pAppend = TRUE)
+
+write.table(dtDUMMY, 
+            file = "C:/FTP/MC_MAP.csv",
+            quote = TRUE     , sep = ";", na = "", dec = ".",             
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+
+stop()
+
+
+write.table(dtMVKEQ[, vMAP, with = FALSE], 
+            file = "C:/FTP/LMARAQ.csv",
+            quote = TRUE     , sep = ";", na = "", dec = ".",             
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+
+write.table(dtVBRP_MATNR, 
+            file = "C:/FTP/VBRP_MATNR.csv",
+            quote = TRUE     , sep = ";", na = "", dec = ".",             
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+
+# setdiff(dtMAP$BRAND, unique(dtMARAQ$BRAND))
+# setdiff(unique(dtMARAQ$BRAND), dtMAP$BRAND) # in MARAQ but not in MAP
+
+#"GB13", "10", "GB13 20"  "IE11 10"  
+```
+
 ```{r LegacyArticleToSAP, echo=fECHO, eval=fEVAL, results=fRESULTS }
+source('../QAR/00_RProj/00_Global/iSynGeneral.R')
 dtMATNR <- dtMEAN[MEINH == "ST" & 
                     EANTP == "Z2" &
                     EAN11 != "DUPLICATE", 
                   .(MATNR, EAN11, EANTP)]
 setnames(dtMATNR, c("EAN11"), c("LMTNR"))
+
+dtMATNR <- rbind(dtMATNR, dtMEAND)
 
 # Quality check on Duplicates
 dtMATNR  <- dtMATNR[, DUP:= duplicated(dtMATNR, by = "LMTNR")]
@@ -454,13 +911,13 @@ dtMATNR <- merge(data.table(LMTNR = unique(dtDATA$LMTNR)),
                  by = "LMTNR", all.x= TRUE)
 
 # Introduce dummy Articles for Articles which are not in iSYnergy
-l_MATNR <- nrow(dtMATNR[is.na(MATNR)])
-dtMATNR <- dtMATNR[, 
-                   `:=` (EANTP = "Z2",
-                         MATNR = ifelse(is.na(MATNR),
-                                        paste0(pLGCINDC, 
-                                               str_pad(1, 17, pad ="0")),
-                                        MATNR))]
+# l_MATNR <- nrow(dtMATNR[is.na(MATNR)])
+# dtMATNR <- dtMATNR[, 
+#                    `:=` (EANTP = "Z2",
+#                          MATNR = ifelse(is.na(MATNR),
+#                                         paste0(pLGCINDC, 
+#                                                str_pad(1, 17, pad ="0")),
+#                                         MATNR))]
 
 dtDATA <- merge(dtMATNR, 
                 dtDATA, 
@@ -515,7 +972,11 @@ dtDATA <- dtDATA[, dtDS$FIELDNM, with = FALSE]
 # ZFTP_FN_POS_HISTORY
 # usr/sap/BA1/FTP/POS/HISTORY/POS_HISTORY.csv
 
-dtDATA2 <- dtDATA[PLANT %in% c("1001", "1263", "1420", "1039")]
+# dtDATA2 <- dtDATA[PLANT %in% c("1001", "1263", "1420", "1039")]
+# dtDATA4 <- dtDATA[G1LGART == "132224"]
+
+dtDATA[G1LGART == "80382 ", MATERIAL:= paste0("DGB", str_pad(string = "2070", width = 15, pad= "0"))]
+dtDATA[G1LGART == "100000", MATERIAL:= paste0("DGB", str_pad(string = "2071", width = 15, pad= "0"))]
 
 if(pEXP){
   write.table(dtDATA, 
@@ -526,13 +987,18 @@ if(pEXP){
 
 write.table(dtDATA2, 
             file = file.path("c:", "FTP", 
-                             paste0("POS_HISTORY_small" , "_"      , 
+                             paste0("POS_HISTORY_small4" , "_"      , 
                                     pECC_SYST, ".csv")) ,
             quote = TRUE     , sep = ","       , na = "", dec = ".",           
             row.names = FALSE, col.names = TRUE, append = FALSE)
 
 fWriteToSheet(dtDATA[1:pSMALL], 
               pPath, pXLSX, "POS", pAppend = FALSE )
+
+# write.table(dtVEUK[SLSDATE >= "20150101" & SLSDATE < "20150105" ], 
+#             file = file.path("c:", "FTP", "VEUK_SAMPLE.csv"),
+#             quote = TRUE     , sep = ",", na = "", dec = ".",             
+#             row.names = FALSE, col.names = TRUE, append = FALSE)
 ```
 
 # Result
@@ -558,8 +1024,229 @@ head(dtDATA[, c(21:ncol(dtDATA)), with = FALSE])
 rm(dtDS)
 ```
 
+```{r Frames_spectales}
+# # read Material
+# library(data.table)
+# 
+# t1 <- Sys.time()
+# pEXPORT <- "test.csv"
+# dtMAT <- fread("c:/FTP/BA1_MATERIAL.txt"    , sep=";", colClasses = "character", select = c("V1", "V48"))
+# setnames(dtMAT, c("MATERIAL", "MGH2"))
+# setkey(dtMAT, "MATERIAL")
+# 
+# # Read History
+# dtDAT <- fread("c:/FTP/VEUK_POS_HISTORY.csv", sep=",", colClasses = "character", drop = c("G1LOFLAG", "G1SPECFG"))
+# setkey(dtDAT, "MATERIAL")
+# vNames <- names(dtDAT)
+# 
+# # JOIN MGH2
+# dtDAT <- dtMAT[dtDAT] # on = "MATERIAL" 
+# 
+# # set Key to BILL_NUM for supercharged calculations
+# system.time(setkey(dtDAT, BILL_NUM))
+# 
+# vLNS <- c("100")
+# vSPC <- c("130", "140")
+# 
+# system.time(
+#   dtDAT[, c("G1LOFLAG2", "G1SPECFG2" ) := 
+#           .((MGH2 %in% vLNS  & !any(MGH2 %in% vSPC)),   # Lens no Frames on the same ticket
+#             ( (MGH2 %in% vLNS & any(MGH2 %in% vSPC)) |  # Lens    Frames on the same ticket 
+#               (MGH2 %in% vSPC & any(MGH2 %in% vLNS))    # Frame   Lenses on the same ticket
+#             )
+#           ),  
+#         by = BILL_NUM]) #[, MGH2:= NULL])  
+# 
+# system.time(setkey(dtDAT , G1LOFLAG2))
+# system.time(dtDAT[.(TRUE), G1LOFLAG:= "X"][, G1LOFLAG2:= NULL])
+# 
+# system.time(setkey(dtDAT , G1SPECFG2))
+# system.time(dtDAT[.(TRUE), G1SPECFG:= "X"][, G1SPECFG2:= NULL])
+# 
+# # Create Example to show result
+# vTST <- c("H141217167", "H141217168" , "H141217169", "H141217229")
+# # dtDT <- dtDAT[.(vTST), .(MGH2, BILL_NUM)]
+# vLNS  <- dtDAT[G1LOFLAG == "X",                   BILL_NUM][1:100]
+# vSPC  <- dtDAT[G1SPECFG == "X",                   BILL_NUM][1:100]
+# vFRM  <- dtDAT[is.na(G1SPECFG) & is.na(G1LOFLAG), BILL_NUM][1:100]
+# dtEXP <- dtDAT[BILL_NUM %in% c(vLNS, vSPC, vFRM)][order(BILL_NUM)]
+# dtEXP <- dtMAT[dtEXP, on = "MATERIAL"]
+# rm(dtMAP, dtMAT)
+# 
+# fWriteToSheet(dtEXP, 
+#               pPath, "SPECFRAM", "Example-Large", pAppend = FALSE )
+# 
+# write.table(dtDAT, 
+#               file = file.path("c:", "FTP", pEXPORT),
+#               quote = TRUE     , sep = ",", na = "", dec = ".",             
+#               row.names = FALSE, col.names = TRUE, append = FALSE)
+# 
+# t2 <- Sys.time()
+# difftime(t2 ,t1)
+# View(dtDAT)
+# 
 
 
+
+
+
+
+
+# system.time(
+#   dtDAT[, c("G1LOFLAG", "G1SPECFG" ) := 
+#           .(
+#             ifelse(MGH2 %in% vLNS  & !any(MGH2 %in% vSPC), "X", ""),   # Lens no Frames on the same ticket
+#             ifelse(
+#               (MGH2 %in% vLNS & any(MGH2 %in% vSPC))            |      # Lens    Frames on the same ticket 
+#                 (MGH2 %in% vSPC & any(MGH2 %in% vLNS))                   # Frame   Lenses on the same ticket
+#               , "X", "")
+#           ),  
+#         by = BILL_NUM]) # [, MGH2:= NULL]
+
+# # Determine unique sets of for Spec and Frame by Bill_num and MGH2
+# dtLNS1 <- unique(dtDAT[MGH2 %in% c("100"       ), .(BILL_NUM, MGH2)])
+# dtFSN1 <- unique(dtDAT[MGH2 %in% c("130", "140"), .(BILL_NUM, MGH2)])
+# 
+# # Determine sets on unique BILL_NUM 
+# dtLNS2 <- unique(dtLNS1[, .(BILL_NUM)])#[, G1LOFLAG:= "X"]
+# dtFSN2 <- unique(dtFSN1[, .(BILL_NUM)])#[, G1SPECFG:= "X"]
+# 
+# # both 100 and 130/140 so SPECFLAG
+# dtSPC <- dtFSN2[ BILL_NUM %in% dtLNS2$BILL_NUM][, `:=`(G1LOFLAG = NA, G1SPECFG= "X")]
+# 
+# # Only 100 no 130/140 so LOFLAG
+# dtLNS <- dtLNS2[!BILL_NUM %in% dtFSN2$BILL_NUM][, `:=`(G1LOFLAG = "X", G1SPECFG= NA)]
+# 
+# # No 100 only 130/140 so both Flags Blank
+# dtFSN <- dtFSN2[!BILL_NUM %in% dtLNS2$BILL_NUM][, `:=`(G1LOFLAG = NA, G1SPECFG= NA)]
+# 
+# # check should all be 0
+# intersect(dtFSN$BILL_NUM, dtLNS$BILL_NUM)
+# intersect(dtSPC$BILL_NUM, dtLNS$BILL_NUM)
+# intersect(dtFSN$BILL_NUM, dtSPC$BILL_NUM)
+# rm(dtFSN2, dtLNS2)
+# 
+# # One set
+# dtMAP <- rbind(dtFSN, dtSPC, dtLNS)
+# rm(dtFSN, dtSPC, dtLNS)
+# gc()
+# 
+# # Return the flags to inital set
+# dtLNS <- dtMAP[dtLNS1, nomatch = 0, on = "BILL_NUM"] 
+# dtFSN <- dtMAP[dtFSN1, nomatch = 0 ,on = "BILL_NUM"] 
+# dtMAP <- rbind(dtLNS, dtFSN)
+# rm(dtLNS, dtLNS1, dtFSN, dtFSN1)
+# 
+# # Join Back Into data Set and remove MGH2
+# dtDAT <- dtMAP[dtDAT, on = c("BILL_NUM", "MGH2")][, MGH2:= NULL]
+# setcolorder(dtDAT, c(vNames, c("G1LOFLAG", "G1SPECFG")))
+
+# # Create Example to show result
+# vLNS  <- dtDAT[G1LOFLAG == "X",                   BILL_NUM][1:100]
+# vSPC  <- dtDAT[G1SPECFG == "X",                   BILL_NUM][1:100]
+# vFRM  <- dtDAT[is.na(G1SPECFG) & is.na(G1LOFLAG), BILL_NUM][1:100]
+# dtEXP <- dtDAT[BILL_NUM %in% c(vLNS, vSPC, vFRM)][order(BILL_NUM)]
+# dtEXP <- dtMAT[dtEXP, on = "MATERIAL"]
+# rm(dtMAP, dtMAT)
+# 
+# fWriteToSheet(dtEXP, 
+#               pPath, "SPECFRAM", "Example-Large", pAppend = FALSE )
+# 
+# write.table(dtDAT, 
+#               file = file.path("c:", "FTP", pEXPORT),
+#               quote = TRUE     , sep = ",", na = "", dec = ".",             
+#               row.names = FALSE, col.names = TRUE, append = FALSE)
+```
+
+
+```{r NewLink}
+# read TD + MD Article; 
+# Join article
+# aggregate by receipt and MGH2, 
+# Join dtWGH
+# aggregate sum(bit) by receipt, 
+# join sum back on receipt  
+source('../QAR/00_RProj/00_Global/iSynGeneral.R')
+
+dtWGH <- data.table(
+  WGH = as.character(seq(from=100, to= 190, by = 10)),
+  BIT = 2^(0:9))
+
+dtUK  <- fread("C:/FTP/1. VEUK_POS_HISTORY.csv", 
+               colClasses = "character")
+#dtUKc <- fread("C:/FTP/3. CONLONS_POS_HISTORY.csv")
+dtMD <- fGetEXPTable(pTableName = "#BI0#PMATERIAL", 
+                     pSystID = "BP1", pClient = 300 )
+dtMD <- dtMD[, .(MATERIAL, RPA_WGH2)]
+setnames(dtMD, c("RPA_WGH2"), c("WGH"))
+setkey(dtMD, "MATERIAL")
+
+dtUKa <- dtMD[dtUK[, .(BILL_NUM, MATERIAL)], on="MATERIAL"][, .N, by = .(BILL_NUM, WGH)]
+
+dtUKa <- dtWGH[dtUKa, on="WGH"]
+setcolorder(dtUKa, c("BILL_NUM", "WGH", "BIT", "N"))
+setkey(dtUKa, "BILL_NUM", "WGH")
+
+dtUKa <- dtUKa[, G1WGHCMB:= sum(BIT), by = .(BILL_NUM)][, .N, by =.(BILL_NUM, G1WGHCMB)]
+
+dtUK <- dtUKa[dtUK, on="BILL_NUM"]
+dtUK[, `:=`(N = NULL)]
+dtDS <- fGetDS()
+dtUK <- dtUK[, dtDS[DATASOURCE == "G1_DS_PA_HIST_FLAT_FILE", FIELDNM], with = FALSE]
+
+write.table(dtUK, 
+            file = file.path("c:", "FTP", pEXPORT),
+            quote = TRUE     , sep = ",", na = "", dec = ".",             
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+
+```
+
+
+# system.time(
+#   dtTST <- dtDT[, c("G1LOFLAG", "G1SPECFG" ) := 
+#                    .(MGH2 %in% c("100"), 
+#                      MGH2 %in% c("130", "140")), 
+#                  by = BILL_NUM])
+# 
+# system.time(
+#   dtTST <- dtDT[, c("G1LOFLAG2", "G1SPECFG2" ) := 
+#                    .(any(G1LOFLAG), 
+#                      any(G1SPECFG)), 
+#                  by = BILL_NUM])
+# 
+# system.time(
+#   dtTST <- dtDT[, c("G1LOFLAG3", "G1SPECFG3" ) := 
+#                    .(any(MGH2 %in% c("100")), 
+#                      any(MGH2 %in% c("130", "140"))), 
+#                  by = BILL_NUM])
+# 
+# system.time(
+#   dtTST <- dtDT[, c("G1LOFLAG4", "G1SPECFG4" ) := 
+#                    .(G1LOFLAG  & !G1SPECFG2, 
+#                      (G1LOFLAG2 &  G1SPECFG) | (G1LOFLAG &  G1SPECFG2)), 
+#                  by = BILL_NUM])
+# 
+# fTrueIsCross <- function(x){
+#   return(if(x == TRUE){"X"})
+# }
+# 
+# system.time(
+#   dtTST <- dtDT[, c("G1LOFLAG5", "G1SPECFG5" ) := 
+#                    .(MGH2 %in% vLNS  & !any(MGH2 %in% vSPC),     # It is a Lens  and there is/are no Frames on the same ticket
+#                      ((MGH2 %in% vLNS & any(MGH2 %in% vSPC)) |   # It is a Lens  and there is/are    Frames on the same ticket 
+#                       (MGH2 %in% vSPC & any(MGH2 %in% vLNS)))),  # It is a Frame and there is/are    Lenses on the same ticket
+#                  by = BILL_NUM])
+# 
+# system.time(
+#   dtTST <- dtDT[, c("G1LOFLAG6", "G1SPECFG6" ) := 
+#                    .(
+#                      fTrueIsCross(MGH2 %in% vLNS  & !any(MGH2 %in% vSPC)),   # Lens no Frames on the same ticket
+#                      fTrueIsCross(
+#                        (MGH2 %in% vLNS & any(MGH2 %in% vSPC))            |   # Lens    Frames on the same ticket 
+#                        (MGH2 %in% vSPC & any(MGH2 %in% vLNS))                # Frame   Lenses on the same ticket
+#                        )
+#                      ),  
+#                  by = BILL_NUM])
 
      CASE  wa_plant-country.
         WHEN 'GB' OR 'IE' OR 'JE'.

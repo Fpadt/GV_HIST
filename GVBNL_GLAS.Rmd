@@ -1,0 +1,572 @@
+
+---
+title: "Legacy Sales - GVBNL
+author: "F.J.Padt"
+date: "`r Sys.Date()`"
+output: 
+   pdf_document:
+    toc:             true
+    toc_depth:       2
+    number_sections: true
+    fig_caption:     true
+    fig_crop:        true
+    highlight:       tango    
+---
+
+\newpage
+![Logo](http://www.grandvision.com/img/logoGV.png) 
+
+[DESIGN](https://projects.gvshare.com/iSynergy/01_Release_1/06._Reporting/02._Design/01._FDs/R20_POS Sales - Margin/)
+
+```{r RSetup, echo=FALSE, eval=TRUE, cache=FALSE, results='hide'}
+
+rm(list=ls())
+gc()
+
+source('../QAR/00_RProj/00_Global/iSynGeneral.R')
+
+# S2R
+# RSDSSEGFD
+# RSDSSEGFDT
+# MEAN
+# /BI0/PPLANT
+
+# Data Settings
+fECHO    <- FALSE
+fEVAL    <- TRUE
+fRESULTS <- 'hide' 
+
+# SAP systems to use
+pECC_SYST <- "RP1"
+pECC_CLNT <- "300"
+pBI_SYST  <- "BP1" 
+pBI_CLNT  <- "300"
+pLGCINDC  <- "C"
+
+# Data Settings
+pOPCO     <- "GVBNL"
+pARTGRP   <- c("GL")
+pROWS     <- -1L
+pSMALL    <- 1000
+pEXMP     <- 50 
+pEXP      <- FALSE
+pPath     <- "./60_Results" 
+pXLSX     <- paste0(pOPCO, "_SALES_", pARTGRP) 
+
+# Open Excel for storing results
+if(file.exists(paste0(pPath, "/", pXLSX, ".xlsx")) == TRUE){
+   file.remove(paste0(pPath, "/", pXLSX, ".xlsx"))
+}
+
+fWriteToSheet(data.frame(ECCSYST = pECC_SYST, 
+                         ECCCLNT = pECC_CLNT,
+                         BI_SYST = pBI_SYST ,
+                         BI_CLNT = pBI_CLNT), 
+              pPath, pXLSX, "PARAM", pAppend = FALSE )
+```    
+
+
+```{r MEAN}
+
+# Material
+dtMEAN       <- fGetEXPTable(pTable  = "MEAN", pKey = c("MATNR", "MEINH"),
+                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtMEAN       <- dtMEAN[, MATNR:= as.character(MATNR)]
+
+setnames(dtMEAN, "EAN11", "G1LGART")
+
+``` 
+
+
+```{r ReadRawData, echo=fECHO, eval=fEVAL, results=fRESULTS}
+# G1NTSLINT, ORGSCCOST, RPA_TTC, 
+# SALESORG, DISTR_CHAN
+vPath   <- "C:/Users/fpadt/Documents/RW/GV_HIST/RAW_DATA/NL_GLAS"
+dtFILES <- dir(vPath)
+dtGLAS <- data.table(
+  G1LGSTNO   = character(0), 
+  BILL_NUM   = character(0), 
+  G1LINKV    = character(0),
+  SLSDATE    = character(0),
+  ORDERDAY   = character(0), 
+  RPA_DRC    = character(0), 
+  G1LGART    = character(0),
+  QUANTITY   = character(0), 
+  BRUTO      = character(0),
+  TOESLAG    = character(0),
+  G1DISCIT   = character(0), 
+  NETTO      = character(0), 
+  NETVAL_INV = character(0), 
+  TAX_AMOUNT = character(0), 
+  FPR1       = character(0),
+  FPR2       = character(0), 
+  FPR3       = character(0), 
+  FPR4       = character(0), 
+  FPR5       = character(0), 
+  FPR6       = character(0), 
+  FPR7       = character(0), 
+  FPR8       = character(0), 
+  FRX        = character(0), 
+  ORDERTYPE  = character(0)
+)
+
+for (vFILE in dtFILES){
+  dtTMP <- fread(paste(vPath, vFILE, sep = "/"), sep = ";", skip = 1,
+                 colClasses = c(rep("character", 7), 
+                                "character", 
+                                rep("character"  , 15),
+                                "character"),
+                 dec = ".")
+  
+  setnames(dtTMP, 
+           c("Sto"       , "Bon"       , "Li"     , "Fakt.dd" , "Orderd.d", "Reden"  , "Art.nr.", 
+             "Aantal"    , "Bruto"     , "Toeslag", "Korting" , "Netto"   ,    
+             "Excl"      , "Btw"       , "FPr[1]" , "FPr[2]"  , "FPr[3]"  , 
+             "FPr[4]"    , "FPr[5]"    , "FPr[6]" , "FPr[7]"  , "FPr[8]"  , "Frx", "OrderType"), 
+              names(dtGLAS)
+           )
+
+  dtGLAS <- rbind(dtGLAS, dtTMP)
+  print(vFILE)
+  print(nrow(dtGLAS))
+  rm(dtTMP)
+}
+
+setcolorder(dtGLAS, neworder = c(1:7, 24, 8:23))
+
+# Cleansing remove equal sign and double quotes
+dtGLAS <- dtGLAS[, `:=` (SLSDATE  = gsub("=\"\"|\"\"", "" , SLSDATE), 
+                         ORDERDAY = gsub("=\"\"|\"\"", "" , ORDERDAY),
+                         G1LGART  = gsub("=\"\"|\"\"", "" , G1LGART))]
+
+# Check for Question marks in the data
+dtTMP01 <- dtGLAS[, lapply(.SD, function(x){any(grepl(".*\\?.*", x))})]
+fWriteToSheet(dtTMP01, 
+              pPath, pXLSX, "FIELDS_W_QM", pAppend = TRUE)
+
+# Legacy Articles with question Mark
+dtTMP01 <- dtGLAS[grepl(".*\\?.*", G1LGART)]
+fWriteToSheet(dtTMP01, 
+              pPath, pXLSX, "MAT_W_QM", pAppend = TRUE)
+
+# Key Figures with Question Mark
+dtTMP01 <- dtGLAS[BRUTO    == "?" | TOESLAG    == "?" | G1DISCIT   == "?" | 
+                  NETTO    == "?" | NETVAL_INV == "?" | TAX_AMOUNT == "?" |
+                  FPR1     == "?" | FPR2       == "?" | FPR3       == "?" | 
+                  FPR4     == "?" | FPR5       == "?" | FPR6       == "?" |
+                  FPR7     == "?" | FPR8       == "?" | FRX        == "?" ]
+fWriteToSheet(dtTMP01, 
+              pPath, pXLSX, "BAD_QUALITY", pAppend = TRUE)
+
+# Replace Question marks by 0
+indxj <- which(sapply(dtGLAS, function(x){any(x == "?")})) 
+for(j in indxj){
+  indx_i <- which(dtGLAS[[j]] == "?")
+  set(x = dtGLAS, i = indx_i, j = j, value = "0")  
+}
+
+# Convert to numeric and replace NA by 0
+for(j in 9:24){
+  set(x = dtGLAS, i = NULL , j = j, value = as.numeric(dtGLAS[[j]]))  
+  indx_i <- which(is.na(dtGLAS[[j]]))
+  set(x = dtGLAS, i = indx_i , j = j, value = 0)    
+}
+
+# SetKey and Aggregate the Data
+setkeyv(dtGLAS, names(dtGLAS)[1:8] )
+dtGLAS <- dtGLAS[, lapply(.SD, sum), .SDcols=9:24, 
+                 by = .(G1LGSTNO, BILL_NUM, G1LINKV, 
+                        SLSDATE, ORDERDAY, RPA_DRC, G1LGART, ORDERTYPE)]
+
+summary(dtGLAS)
+# coding to find outliers
+save.image(file = paste0("GLAS", format(today(), "%Y%m%d"), "_ReadRawData", ".RData" ))
+```
+
+Bij toeslagen (dat zijn artikelnummers startend met een 9) dient het getal in de FPr(1) kolom niet meegenomen te worden voor de VVP, omdat dit bedrag ook al op een andere regel van het bonnummer staat.
+
+Dus startend met een 9: alle kolommen tussen FPr (2) t/m Frx optellen
+Niet startend met een 9: alle kolommen tussen FPr(1) t/m Frx optellen.
+Dit geldt voor zowel de RPC1 en RTC1
+17224: RPC1=RTC1 = 19.84
+17225: RPC1=RTC1 = 9.44
+
+OSC1 zit voor historical data niet in deze dump en kan dus niet gevuld worden.
+
+```{r BRules,}
+# In case article number start with a 9 the FPR1 is set to 0
+# Next the RPC1, RTC1 is determined by adding all FRP1-9+FRx
+indx_i <- which(substr(dtGLAS$G1LGART, 1, 1) == "9")
+set(x = dtGLAS, i = indx_i, j = "FPR1", value = 0)
+
+# calculate VVP
+dtGLAS[, RETPRCOST:= FPR1 + FPR2 + FPR3 + FPR4 + FPR5 + FPR6 + FPR7 + FPR8 + FRX]
+dtGLAS[, `:=` (
+  SLSDATE        = paste0(substr(SLSDATE, 7, 10), 
+                          substr(SLSDATE, 4, 5), 
+                          substr(SLSDATE, 1, 2)),
+  BILL_NUM       = paste0("H", 
+                          str_pad(G1LGSTNO, 3, pad = "0", side = "left"), 
+                          str_pad(BILL_NUM, 6, pad = "0", side = "left")),
+  RPA_DRC        = toupper(x = RPA_DRC),
+  G1LINKV        = NA,
+  G1LGSTNO       = str_pad(G1LGSTNO, 3, pad ="0", side = "left"),
+  RETTRCOST      = RETPRCOST,
+  RPA_TTC        = 0,                                              # To be filled
+  ORGSCCOST      = 0,
+  G1NTSLINT      = NETTO,
+  G1LISLINT      = BRUTO + TOESLAG,  
+  DOC_CURRCY     = "EUR",
+  UNIT           = "ST",
+  RETAILTYPECODE =  NA,
+  G1LOFLAG       =  NA, 
+  G1SPECFG       =  NA,
+  G1WGHCMB       =  NA
+)]
+
+# Generate BILL_ITEM by BILL_NUM which should be unique although , G1LGSTNO, SLSDATE
+system.time(
+  dtGLAS <- dtGLAS[, BILL_ITEM:= str_pad(seq(from = 1, to = .N, by = 1), 
+                                       width = 5, pad = "0"), 
+                 by=.(BILL_NUM)])
+
+save.image(file = paste0("GLAS", format(today(), "%Y%m%d"), "_BRules", ".RData" ))
+
+```
+
+```{r Site mapping}
+dtPLANT     <- fGetEXPTable(pTable  = "#BI0#PPLANT",
+                            pKey    = "PLANT",
+                            pSystID = pBI_SYST, pClient = "300")
+dtPLANT     <- dtPLANT[PLANTCAT == "A"] 
+
+dtPLANTT    <- fread(input = "./RAW_DATA/GVBNL_PLANTT.csv", sep = ";",
+                     colClasses = "character", stringsAsFactors = FALSE)
+
+# PLANT
+dtPLANT <- dtPLANT[SALESORG %in% c("NL01", "BE01", "NL02", "BE02", "NL14", "NL07") ]
+
+# remove reference stores and merge time dependent legacy
+dtPLANT <- dtPLANT[substr(PLANT, 1, 1) != "Z"]
+dtPLANT <- dtPLANT[, CHK:= substr(G1LGSTNO, nchar(G1LGSTNO)-2, nchar(G1LGSTNO))]
+dtPLANT <- dtPLANTT[dtPLANT, on = c("PLANT", "CHK"), .(PLANT, G1LGSTNO, CHK, FROM, SALESORG, DISTR_CHAN)]
+dtPLANT <- dtPLANT[, `:=`(G1LGSTNO = CHK, CHK = NULL)]
+dtTMP03 <- dtPLANT[!is.na(FROM)][order(G1LGSTNO)]
+dtPLANT <- dtPLANT[is.na(FROM), FROM:= "10000101"]
+
+# check If any closed stores missing
+dtTMP03 <- data.table(CLOSED_MISSING   = setdiff(unique(dtGLAS$G1LGSTNO), dtPLANT$G1LGSTNO))
+dtTMP04 <- data.table(SITE_WO_SALES    = setdiff(dtPLANT$G1LGSTNO       , unique(dtGLAS$G1LGSTNO)))
+
+if(nrow(dtTMP03) > 0){ warning("CLOSED Stores Missing")}
+# if(nrow(dtTMP04) > 0){ warning("Sites without sales")}
+
+fWriteToSheet(dtTMP03, 
+              pPath, pXLSX, "CLOSED_MISSING", pAppend = TRUE)
+fWriteToSheet(dtTMP04, 
+              pPath, pXLSX, "SITE_WO_SALES", pAppend = TRUE)
+
+# Map the data Of the Legacy Stores
+setnames(dtPLANT, "FROM", "SLSDATE")
+system.time(
+  dtGLAS <- dtPLANT[dtGLAS, roll = TRUE, rollends = TRUE, 
+               on = c("G1LGSTNO", "SLSDATE")])
+save.image(file = paste0("GLAS", format(today(), "%Y%m%d"), "_site", ".RData" ))
+```
+
+
+```{r LegacyArticleToSAP, echo=fECHO, eval=fEVAL }
+# add the iSynergy Article next to the legacy article
+# Material - Read the MEAN table whcih contains the mapping
+# dtMEAN       <- fGetEXPTable(pTable  = "MEAN", pKey = c("MATNR", "MEINH"),
+#                              pSystID = "RA1", pClient = "300")
+# dtMEAN       <- dtMEAN[, MATNR:= as.character(MATNR)]
+
+dtMATNR <- dtMEAN[MEINH   == "ST" & 
+                  EANTP   == "Z1" &
+                  G1LGART != "DUPLICATE", 
+                  .(MATNR, G1LGART, EANTP)]
+setnames(dtMATNR, c("G1LGART"), c("LMTNR"))
+
+# Quality check on Duplicates
+dtMATNR  <- dtMATNR[, DUP:= duplicated(dtMATNR, by = "LMTNR")]
+
+dtTMP03  <- copy(dtMATNR)
+setkey(dtTMP03, "LMTNR", "MATNR")
+dtTMP03  <- dtTMP03[, DUPA:= any(DUP)          , by = "LMTNR" ]
+dtTMP03  <- dtTMP03[DUPA == TRUE ]
+fWriteToSheet(dtTMP03, 
+              pPath, pXLSX, "MEAN_DUP", pAppend = TRUE )
+
+# Doubles with Sales
+dtTMP04 <- dtTMP03[LMTNR %in% unique(dtGLAS[MATNR %in% dtTMP03$LMTNR]$MATNR) ]
+fWriteToSheet(dtTMP04, 
+              pPath, pXLSX, "DOUBLES_W_SLS", pAppend = TRUE )
+
+# take out doubles with & without Sales
+dtTMP05 <- dtTMP03[DUP == TRUE, .(MATNR, LMTNR)][, DEL:= "X"]
+setkey(dtTMP05, "MATNR", "LMTNR")
+setkey(dtMATNR, "MATNR", "LMTNR")
+dtMATNR  <- dtTMP05[dtMATNR][is.na(DEL), .(MATNR, LMTNR)]
+
+# Add the iSynergy Article next to the legacy article
+setnames(dtGLAS, c("G1LGART"), c("LMTNR"))
+
+# All Articles With Sales (1375)
+dtMATNR <- dtMATNR[LMTNR %in% unique(dtGLAS$LMTNR)]
+
+# read Dummy Mapping
+dtDUMMY <- fread("./RAW_DATA/Gl_MAPPING.csv", colClasses = "character")
+setnames(dtDUMMY, "MATERIAL", "MATNR")
+
+dtTMP10 <- dtDUMMY[grepl(".*\\?.*", LMTNR)]
+fWriteToSheet(dtTMP10, 
+              pPath, pXLSX, "DUMMY_with_QM", pAppend = TRUE )
+
+# check If any Articles are both Dummy and in Mean
+dtTMP06 <- data.table(DUMMY_NOT_MEAN   = setdiff(unique(dtDUMMY$LMTNR), dtMATNR$LMTNR))
+dtTMP07 <- data.table(MEAN_NOT_DUMMY   = setdiff(dtMATNR$LMTNR        , unique(dtDUMMY$LMTNR)))
+dtTMP08 <- data.table(MEAN_AND_DUMMY   = intersect(dtMATNR$LMTNR      , unique(dtDUMMY$LMTNR)))
+dtDUMMY <- dtDUMMY[!LMTNR %in% dtTMP08$MEAN_AND_DUMMY]
+
+fWriteToSheet(dtMATNR, 
+              pPath, pXLSX, "ARTICLE_MAPPING", pAppend = TRUE )
+
+fWriteToSheet(dtTMP08, 
+              pPath, pXLSX, "MEAN_AND_DUMMY", pAppend = TRUE )
+
+# identify Legacy Articles which do not have a Dummy nor isynergy mapping
+# create a new Dummy for those
+dtTMP11 <- data.table(LMTNR = setdiff(unique(dtGLAS$LMTNR), dtMATNR$LMTNR))
+dtTMP11 <- dtTMP11[!LMTNR %in% dtDUMMY$LMTNR ]
+dtTMP11 <- dtTMP11[, .(MATNR = "DNL0000000000000GL", LMTNR)]
+
+fWriteToSheet(dtTMP11, 
+              pPath, pXLSX, "DUMMY__FOR_MISSING_LART", pAppend = TRUE )
+
+dtMATNR<- rbind(dtMATNR, dtDUMMY,dtTMP11)
+setkey(dtMATNR, "LMTNR")
+dtMATNR <- unique(dtMATNR)
+
+dtMATNR <- dtMATNR[, DUP := duplicated(dtMATNR, by = "LMTNR")]
+dtMATNR <- dtMATNR[, DUPA:= any(DUP), by = "LMTNR" ]
+View(dtMATNR[DUPA == TRUE])
+dtMATNR <- dtMATNR[, .(MATNR, LMTNR)]
+
+# Mapping
+iNROW <- nrow(dtGLAS)
+dtGLAS <- dtMATNR[dtGLAS, on = "LMTNR"]
+if(nrow(dtGLAS) != iNROW){ warning("FAN-TRAP!")}
+
+# Non-Migrated Articles
+dtTMP09 <- data.table(
+  LMTNR = unique(dtGLAS[is.na(MATNR)]$LMTNR))
+
+if(nrow(dtTMP09) > 0){ 
+  warning("NON_MIGRATED_W_SALES")
+  
+  fWriteToSheet(dtTMP09, 
+                pPath, pXLSX, "NON_MIGRATED_W_SALES", pAppend = TRUE )
+}
+
+# fWriteToSheet(dtDATA[is.na(MATNR)], 
+#               pPath, pXLSX, "NON_MIGRATED_SALES", pAppend = TRUE )
+
+# with(dtGLAS, tapply(x = QUANTITY, INDEX = substr(MATNR, 1, 3) != "DNL", mean))
+
+dtPERC <- data.table(
+  vTQ  = sum(as.numeric(dtGLAS$QUANTITY)),
+  vTN  = sum(as.numeric(dtGLAS$NETTO))
+)
+
+dtPERC <- dtPERC[, `:=`(vPMQ = 100 * sum(as.numeric(dtGLAS[substr(MATNR, 1, 3) != "DNL"]$QUANTITY), na.rm = TRUE)/vTQ,
+                        vPNQ = 100 * sum(as.numeric(dtGLAS[substr(MATNR, 1, 3) != "DNL"]$QUANTITY), na.rm = TRUE)/vTQ,
+                        vPMN = 100 * sum(as.numeric(dtGLAS[substr(MATNR, 1, 3) != "DNL"]$NETTO)   , na.rm = TRUE)/vTN,
+                        vPNN = 100 * sum(as.numeric(dtGLAS[substr(MATNR, 1, 3) != "DNL"]$NETTO)   , na.rm = TRUE)/vTN
+)]
+
+fWriteToSheet(dtPERC, 
+              pPath, pXLSX, "PERCENTAGE_MAPPED", pAppend = TRUE )
+
+# Dummies to be Uploaded
+dt0MAT_DUM_GL <- dtMATNR[substr(MATNR, 1, 3) == "DNL"][, RPA_WGH2:= 100]
+save(dt0MAT_DUM_GL, file = "dt0MAT_DUM_GL.RData")
+fWriteToSheet(dt0MAT_DUM_GL, 
+              pPath, pXLSX, "DUMMY_MASTERDATA", pAppend = TRUE )
+
+# rm(dtMATNR, dtMEAN)
+gc()
+save.image(file = paste0("GLAS", format(today(), "%Y%m%d"), "_Article", ".RData" ))
+```
+
+
+```{r  Missing2, echo=fECHO, eval=fEVAL}
+
+
+#dtLMT_SALES <- dtDATA[is.na(MATNR), .N, by = .(LMTNR, SALESORG, DISTR_CHAN )]
+# join with Mapping FILE
+# dtLMTERIAL  <- dtDATA[is.na(MATNR), .N, by = .(LMTNR)]
+# 
+# if(pARTGRP == "NL"){
+#   dtNAV      <- data.table(NAV = c("30" , "32" , "35" , "37" , "40" , "70"),
+#                            RPA_WGH2 = c("130", "130", "140", "140", "120", "110")) 
+#   dtLMTERIAL <- dtLMTERIAL[, NAV:= substr(LMTNR, 1, 2)]
+#   setkey(dtLMTERIAL, "NAV")
+#   dtLMTERIAL <- dtNAV[dtLMTERIAL, on = "NAV"]
+#   
+#   dtLMTERIAL <- dtLMTERIAL[is.na(RPA_WGH2), RPA_WGH2:= "170"]
+#   dtLMTERIAL <- dtLMTERIAL[, DADD:= 0]
+# } else if(pARTGRP == "CL") { 
+#   dtLMTERIAL <- dtLMTERIAL[, RPA_WGH2:= "110"]
+#   dtLMTERIAL <- dtLMTERIAL[, DADD:= 1000]
+# }
+
+
+
+# dtLMTERIAL <- dtLMTERIAL[, DUMMY:= .GRP, by = .(RPA_WGH2) ]
+# if (length(pARTGRP) == 1){dtLMTERIAL <- dtLMTERIAL[, DUMMY:= DUMMY + DADD ][, DADD:= NULL]}
+# dtLMTERIAL <- dtLMTERIAL[, DUMMY:= paste0("DNL", 
+#                                           str_pad(DUMMY, width = 15, pad="0"))]
+
+# setnames(dtDUMMY, "G1LGART", "LMTNR" )
+
+
+# dtMATERIAL <- dtLMTERIAL[, .N, by = .(DUMMY, RPA_WGH2)][, N:=NULL]
+# setnames(dtMATERIAL, "DUMMY", "MATERIAL")
+# setkey(dtMATERIAL, "MATERIAL")
+# 
+# dtLMTERIAL <- dtLMTERIAL[,          .(LMTNR, DUMMY)]
+# setkey(dtLMTERIAL, "LMTNR")
+# 
+# dtMAT_SALES <- dtLMTERIAL[dtLMT_SALES, on = "LMTNR"]
+# dtMAT_SALES <- dtMAT_SALES[, .N, by = .(DUMMY, SALESORG, DISTR_CHAN)][, N:=NULL]
+# setnames(dtMAT_SALES, "DUMMY", "MATERIAL")
+# setkey(dtMAT_SALES, "MATERIAL", "DISTR_CHAN", "SALESORG")
+# 
+# dtDATA <- dtLMTERIAL[dtDATA, on = "LMTNR"]
+# dtDATA <- dtDATA[is.na(MATNR), MATNR:= DUMMY][, DUMMY:= NULL]
+
+```
+
+
+```{r}
+# dtGLAS <- unique(dtGLAS)
+# dtGLAS <- dtGLAS[, TYPE:= "GL"]
+# dtGLAS <- merge(dtGLAS, dtMEAN[EANTP == "Z1", .(MATNR, G1LGART)],
+#                 by = "G1LGART", all.x = TRUE)
+# setkey(dtGLAS, "MATNR")
+# dtGLAS <- dtGLAS[is.na(Q) , Q:= 0]
+# dtGLAS <- dtGLAS[is.na(V) , V:= 0]
+# setcolorder(dtGLAS, c("TYPE", "Y", "G1LGART", "MATNR", "Q", "V"))
+# 
+# dtGLS1 <- dtGLAS[ , .(Q = sum(Q), V = sum(V)), by = c("TYPE", "Y", "G1LGART", "MATNR")]
+# dtGLS1 <- dtGLAS[ is.na(MATNR), M:= 0]
+# dtGLS1 <- dtGLAS[!is.na(MATNR), M:= 1]
+# dtGLS2 <- dtGLAS[ , .(Q = sum(Q), V = sum(V)), by = c("TYPE", "Y", "M")]
+# save(dtGLAS, file = "dtGLAS.RData")
+
+# dtDS <- fGetDS()
+
+setnames(dtGLAS,
+         c("LMTNR"    , "MATNR"    ),
+         c("G1LGART"  , "MATERIAL" )
+         )
+
+# Select and Order the fields in the same order as the DataSource
+# dtDATA <- dtDATA[, dtDS$FIELDNM, with = FALSE]
+# RPA_TTC, ORGSCCOST, G1NTSLINT
+dtGLAS <- fAlignDS(pDT =  dtGLAS, pDS = "G1_DS_PA_HIST_FLAT_FILE")
+# dtGLAS <- dtGLAS[, dtDS[DATASOURCE == "G1_DS_PA_HIST_FLAT_FILE", FIELDNM], with = FALSE]
+
+# write.table(dtDATA, file = file.path("c:", "FTP", paste0("GVBNL", "_", pARTGRP, ".csv")),
+#             quote = TRUE     , sep = ",", na = "", dec = ".",             
+#             row.names = FALSE, col.names = TRUE, append = FALSE)
+
+save.image(file = paste0("GLAS", format(today(), "%Y%m%d"), "_Final", ".RData" ))
+write.table(dtGLAS, 
+            file = "C:/FTP/GVBNL_GLAS.csv",
+            quote = TRUE     , sep = ",", na = "", dec = ".",             
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+
+write.table(dtDUMMY, 
+            file = "C:/FTP/dummy.csv",
+            quote = TRUE     , sep = ",", na = "", dec = ".",             
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+
+```
+
+
+```{r Frames_spectales}
+# read Material
+library(data.table)
+
+t1 <- Sys.time()
+pEXPORT <- "test.csv"
+dtMAT <- fread("c:/FTP/BA1_MATERIAL.txt"    , sep=";", colClasses = "character", select = c("V1", "V48"))
+setnames(dtMAT, c("MATERIAL", "MGH2"))
+setkey(dtMAT, "MATERIAL")
+
+# Read History
+dtDAT <- fread("c:/FTP/GVBNL_POS_HISTORY_NL.csv", sep=",", colClasses = "character", drop = c("G1LOFLAG", "G1SPECFG"))
+setkey(dtDAT, "MATERIAL")
+vNames <- names(dtDAT)
+
+# JOIN MGH2
+dtDAT <- dtMAT[dtDAT] # on = "MATERIAL" 
+
+# set Key to BILL_NUM for supercharged calculations
+system.time(setkey(dtDAT, BILL_NUM))
+
+vLNS <- c("100")
+vSPC <- c("130", "140")
+
+system.time(
+  dtDAT[, c("G1LOFLAG2", "G1SPECFG2" ) := 
+          .((MGH2 %in% vLNS  & !any(MGH2 %in% vSPC)),   # Lens no Frames on the same ticket
+            ( (MGH2 %in% vLNS & any(MGH2 %in% vSPC)) |  # Lens    Frames on the same ticket 
+              (MGH2 %in% vSPC & any(MGH2 %in% vLNS))    # Frame   Lenses on the same ticket
+            )
+          ),  
+        by = BILL_NUM]) #[, MGH2:= NULL])  
+
+system.time(setkey(dtDAT , G1LOFLAG2))
+system.time(dtDAT[.(TRUE), G1LOFLAG:= "X"][, G1LOFLAG2:= NULL])
+
+system.time(setkey(dtDAT , G1SPECFG2))
+system.time(dtDAT[.(TRUE), G1SPECFG:= "X"][, G1SPECFG2:= NULL])
+
+# Create Example to show result
+vTST <- c("H141217167", "H141217168" , "H141217169", "H141217229")
+# dtDT <- dtDAT[.(vTST), .(MGH2, BILL_NUM)]
+vLNS  <- dtDAT[G1LOFLAG == "X",                   BILL_NUM][1:100]
+vSPC  <- dtDAT[G1SPECFG == "X",                   BILL_NUM][1:100]
+vFRM  <- dtDAT[is.na(G1SPECFG) & is.na(G1LOFLAG), BILL_NUM][1:100]
+dtEXP <- dtDAT[BILL_NUM %in% c(vLNS, vSPC, vFRM)][order(BILL_NUM)]
+dtEXP <- dtMAT[dtEXP, on = "MATERIAL"]
+rm(dtMAP, dtMAT)
+
+fWriteToSheet(dtEXP, 
+              pPath, "SPECFRAM", "Example-Large", pAppend = FALSE )
+
+write.table(dtDAT, 
+              file = file.path("c:", "FTP", pEXPORT),
+              quote = TRUE     , sep = ",", na = "", dec = ".",             
+              row.names = FALSE, col.names = TRUE, append = FALSE)
+
+t2 <- Sys.time()
+difftime(t2 ,t1)
+View(dtDAT)
+
+
+
+```
+
+Link Value	Description
+1	Invoice where Merchandise Category level 2 100 - Frame Lenses only
+2A	Invoice where there is at least a sale for the combination Merchandise Category level 2 100 – Frame Lenses (2 lenses) and 130-Frames (1 frame) 
+2B	Invoice where there is at least a sale for the combination Merchandise Category level 2 100 – Frame Lenses (2 lenses) and 140 - Sunglasses (frame) 
+2C	Invoice where Merchandise Category level 2 is equal to 100 – Frame Lenses and not equal to 130 – Frames and 140 – Sunglasses 
+3	Invoice where Merchandise Categories not equal to Merchandise Category Level 2 100 - Frame Lenses and 110 - Contact Lenses 
+4	Invoice where Merchandise Category Level 2 110 - Contact Lenses in combination with Merchandise Category Level 2 not equal to 120 – Contact Lens Solutions (ie. Sale of Contact Lenses and a sunglass on one invoice)
+5	Invoice where Merchandise Category Level 2 110 - Contact Lenses in combination with Merchandise Category Level 2 120 – Contact Lens Solutions 
+

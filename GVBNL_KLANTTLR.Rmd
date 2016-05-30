@@ -58,13 +58,22 @@ fWriteToSheet(data.frame(ECCSYST = pECC_SYST,
 
 ```{r ReadRawData, echo=fECHO, eval=fEVAL}
 
-dtADRC      <- fGetSAPTable(pTable = "ADRC", 
-                            pSystID = pECC_SYST, pClient = pECC_CLNT)
+# dtADRC      <- fGetEXPTable(pTable = "ADRC", 
+#                             pSystID = pECC_SYST, pClient = pECC_CLNT)
+# 
+# dtT001W     <- fGetEXPTable(pTable = "T001W", pKey = c("WERKS"),
+#                             pSystID = pECC_SYST, pClient = pECC_CLNT)
 
-dtT001W     <- fGetSAPTable(pTable = "T001W", pKey = c("WERKS"),
-                            pSystID = pECC_SYST, pClient = pECC_CLNT)
+dtPLANT     <- fGetEXPTable(pTable  = "#BI0#PPLANT",
+                            pKey    = "PLANT",
+                            pSystID = pBI_SYST, pClient = "300")
+dtPLANT     <- dtPLANT[PLANTCAT == "A"] 
+setnames(dtPLANT, "/BIC/G1LGSTNO", "G1LGSTNO")
 
-dtRSDSSEGFD <- fGetSAPTable(pTable = "RSDSSEGFD", 
+dtPLANTT    <- fread(input = "./RAW_DATA/GVBNL_PLANTT.csv", sep = ";",
+                     colClasses = "character", stringsAsFactors = FALSE)
+
+dtRSDSSEGFD <- fGetEXPTable(pTable = "RSDSSEGFD", 
                             pSystID = pBI_SYST, pClient = pBI_CLNT)
 
 dtDATA     <- fread(file.path(".", "RAW_DATA", "IDLKlantenteller.csv"),  
@@ -72,10 +81,10 @@ dtDATA     <- fread(file.path(".", "RAW_DATA", "IDLKlantenteller.csv"),
 
 setnames(
   dtDATA,
-  c("store", "datum", "tijd"  ,
-    "in1"  , "uit1" , "in2"   , "uit2"),
-  c("LWRKS", "CALDAY", "REGHR", 
-    "IN1"  , "OUT1" , "IN2"   , "OUT2"))
+#   c("store"   , "datum" , "tijd"  ,
+#     "in1"     , "uit1"  , "in2"   , "uit2"),
+  c("G1LGSTNO", "CALDAY", "REGHR" , 
+    "IN1"     , "OUT1"  , "IN2"   , "OUT2"))
 
 
 ```
@@ -108,8 +117,8 @@ fWriteToSheet(head(dtDATA[1:10]), pPath, pXLSX, "DATA"   , pAppend = TRUE)
 system.time(
   dtDATA <- dtDATA[, `:=`(
     RECORDMODE = "N",
-    LWRKS      = str_pad(LWRKS, 3, pad ="0"),
-    REGHR       = paste0(gsub(pattern = ":", replacement = "", REGHR), "00"),
+    G1LGSTNO   = str_pad(G1LGSTNO, 3, pad ="0"),
+    REGHR      = paste0(gsub(pattern = ":", replacement = "", REGHR), "00"),
     IN1        = as.integer(IN1),
     OUT1       = as.integer(OUT1),
     IN2        = as.integer(IN2),
@@ -119,59 +128,128 @@ gc()
 ```
 
 ```{r LegacyStoreToSAP, echo=fECHO, results=fRESULTS}
-# add the iSynergy Store next to the legacy store
-setnames(dtADRC, "ADDRNUMBER", "ADRNR")
+# Rolling Join
+# PLNT <-  data.table(STORE = c("0053"    , "0053"    , "0054"    ), 
+#                     TIME  = c("20130101", "20140101", "20150101"),
+#                     LEG   = c("C100"    , "C200"    , "C300"))
+# setkey(PLNT, STORE, TIME)
+# 
+# DAT <- data.table(STORE = c("0053"    , "0053"    , "0053"    ), 
+#                   TIME  = c("20130201", "20140501", "20150101"),
+#                   VIS   = c(100       ,   200     ,  300) )
+# setkey(DAT, STORE, TIME)
+# 
+# View(PLNT[DAT, roll =TRUE]) # Right results
+# View(DAT[PLNT, roll =TRUE]) # wrong results
 
-dtWERKS  <- merge(dtT001W[ , .(ADRNR, WERKS, VKORG, VTWEG, VLFKZ)], 
-                  dtADRC[  , .(ADRNR, SORT2)],
-                  all.x = TRUE, by = "ADRNR")
 
-# Select only NL stores
-dtWERKS  <- dtWERKS[substr(VKORG, 1, 2) %in% c("NL", "BE")]
+# PLANT
+dtPLANT <- dtPLANT[SALESORG %in% c("NL01", "BE01", "NL02", "BE02", "NL14", "NL07") ]
+setkey(dtPLANT, PLANT)
+
+dtPLANT <- dtPLANT[substr(PLANT, 1, 1) != "Z"]
+dtPLANT <- dtPLANT[, CHK:= substr(G1LGSTNO, nchar(G1LGSTNO)-2, nchar(G1LGSTNO))]
+dtPLANT <- dtPLANTT[dtPLANT, on = c("PLANT", "CHK"), .(PLANT, G1LGSTNO, CHK, FROM)]
+dtPLANT <- dtPLANT[, `:=`(G1LGSTNO = CHK, CHK = NULL)]
+dtTMP03 <- dtPLANT[!is.na(FROM)][order(G1LGSTNO)]
+dtPLANT <- dtPLANT[is.na(FROM), FROM:= "10000101"]
+
+# View(dtPLANT[as.integer(G1LGSTNO) > 999, .(PLANT, G1LGSTNO)])
+# 0074 90074 View(dtPLANT[grepl(pattern = "074", x= G1LGSTNO)])
+# 0677 90677 View(dtPLANT[grepl(pattern = "677", x= G1LGSTNO)])
+# 0735 90735 View(dtPLANT[grepl(pattern = "735", x= G1LGSTNO)])
+# 0953 90953 View(dtPLANT[grepl(pattern = "953", x= G1LGSTNO)])
+
+# dtPLANT <- dtPLANT[!(PLANT %in% c("0053", "0056", "0069", "0073", "0218", "0397", "0528", "0677", "0954")) &
+#                    substr(PLANT, 1, 1) != "Z" ]
+
+View(dtPLANT[G1LGSTNO %in% c("053", "056", "069", "073", "218", "397", 
+                             "528", "641", "729", "815", "816", "831", 
+                             "846", "933", "935", "995", "988")][order(G1LGSTNO, FROM), .(PLANT, G1LGSTNO, FROM)])
+
+# Quality check on duplicate Legacy Stores
+dtTMP02  <- copy(dtPLANT)
+dtTMP02  <- dtTMP02[, DUP:= duplicated(dtTMP02, by = "G1LGSTNO")]
+dtTMP02  <- dtTMP02[, DUP:= any(DUP)          , by = "G1LGSTNO" ]
+dtTMP02  <- dtTMP02[DUP == TRUE ]
+View(dtTMP02[, .(PLANT, G1LGSTNO, FROM)][order(G1LGSTNO, FROM)])
+
+fWriteToSheet(dtTMP02, 
+              pPath, pXLSX, "PLANT_DUP", pAppend = TRUE )
+
+# check If any closed stores missing
+dtTMP03 <- data.table(CLOSED_MISSING   = setdiff(unique(dtDATA$G1LGSTNO), dtPLANT$G1LGSTNO))
+dtTMP04 <- data.table(SITE_WO_FOOTFALL = setdiff(dtPLANT$G1LGSTNO       , unique(dtDATA$G1LGSTNO)))
+
+# Map the data Of the Legacy Stores
+setnames(dtPLANT, "FROM", "CALDAY")
+system.time(
+  dtDATA <- dtPLANT[dtDATA, roll = TRUE, rollends = TRUE, 
+               on = c("G1LGSTNO", "CALDAY")])
+# dtDATA  <- merge(dtPLANT[, .(G1LGSTNO, PLANT)], 
+#                  dtDATA, 
+#                  all.y = TRUE, by = "G1LGSTNO")
+
 
 # Remove stores which are not Mapped
-dtTMP01  <- dtWERKS[ is.na(SORT2)][, SORT2:= NULL]
-fWriteToSheet(dtTMP01, 
-              pPath, pXLSX, "WERKS_NO_SORT2", pAppend = TRUE )
+# dtTMP01  <- dtPLANT[ is.na(G1LGSTNO)][, G1LGSTNO:= NULL]
+# fWriteToSheet(dtTMP01, 
+#               pPath, pXLSX, "WERKS_NO_SORT2", pAppend = TRUE )
 
-dtWERKS  <- dtWERKS[!is.na(SORT2)] 
+# dtWERKS  <- dtWERKS[!is.na(SORT2)] 
+# # add the iSynergy Store next to the legacy store
+# setnames(dtADRC, "ADDRNUMBER", "ADRNR")
+# 
+# dtWERKS  <- merge(dtT001W[ , .(ADRNR, WERKS, VKORG, VTWEG, VLFKZ)], 
+#                   dtADRC[  , .(ADRNR, SORT2)],
+#                   all.x = TRUE, by = "ADRNR")
+# 
+# # Select only NL stores
+# dtWERKS  <- dtWERKS[substr(VKORG, 1, 2) %in% c("NL", "BE")]
+# 
+# # Remove stores which are not Mapped
+# dtTMP01  <- dtWERKS[ is.na(SORT2)][, SORT2:= NULL]
+# fWriteToSheet(dtTMP01, 
+#               pPath, pXLSX, "WERKS_NO_SORT2", pAppend = TRUE )
+# 
+# dtWERKS  <- dtWERKS[!is.na(SORT2)] 
+# 
+# setnames(dtWERKS, c("SORT2"), c("LWRKS"))
+# 
+# # Quality check on Duplicates
+# dtWERKS  <- dtWERKS[, DUP:= duplicated(dtWERKS, by = "LWRKS")]
+# 
+# dtTMP02  <- copy(dtWERKS)
+# dtTMP02  <- dtTMP02[, DUP:= any(DUP)          , by = "LWRKS" ]
+# dtTMP02  <- dtTMP02[DUP == TRUE ]
+# 
+# if(nrow(dtTMP02) > 0){
+#   fWriteToSheet(dtTMP02, 
+#                 pPath, pXLSX, "WERKS_DUP", pAppend = TRUE )
+#   fWriteToSheet(dtWERKS[DUP == TRUE], 
+#                 pPath, pXLSX, "LWRKS_DEL", pAppend = TRUE )
+#   }
+# 
+# dtWERKS  <- dtWERKS[DUP == FALSE][, DUP:=NULL]
+# 
+# # stores With Visitor counter details
+# dtWERKS <- dtWERKS[LWRKS %in% unique(dtDATA$LWRKS)]
+# 
+# dtWERKS <- merge(data.table(LWRKS = unique(dtDATA$LWRKS)),
+#                  dtWERKS[, .(LWRKS, WERKS)],
+#                  all.x = TRUE, by = "LWRKS")
 
-setnames(dtWERKS, c("SORT2"), c("LWRKS"))
-
-# Quality check on Duplicates
-dtWERKS  <- dtWERKS[, DUP:= duplicated(dtWERKS, by = "LWRKS")]
-
-dtTMP02  <- copy(dtWERKS)
-dtTMP02  <- dtTMP02[, DUP:= any(DUP)          , by = "LWRKS" ]
-dtTMP02  <- dtTMP02[DUP == TRUE ]
-
-if(nrow(dtTMP02) > 0){
-  fWriteToSheet(dtTMP02, 
-                pPath, pXLSX, "WERKS_DUP", pAppend = TRUE )
-  fWriteToSheet(dtWERKS[DUP == TRUE], 
-                pPath, pXLSX, "LWRKS_DEL", pAppend = TRUE )
-  }
-
-dtWERKS  <- dtWERKS[DUP == FALSE][, DUP:=NULL]
-
-# stores With Visitor counter details
-dtWERKS <- dtWERKS[LWRKS %in% unique(dtDATA$LWRKS)]
-
-dtWERKS <- merge(data.table(LWRKS = unique(dtDATA$LWRKS)),
-                 dtWERKS[, .(LWRKS, WERKS)],
-                 all.x = TRUE, by = "LWRKS")
-
-# Introduce dummy stores for closed stores which are not in iSYnergy
-dtCWRKS <- dtWERKS[is.na(WERKS)]
-dtCWRKS <- dtCWRKS[, WERKS:= paste0(pLGCINDC, 
-                                    str_pad(1:nrow(dtCWRKS), 3, pad ="0"))]
-
-dtWERKS <- rbind(dtWERKS[!is.na(WERKS)],
-                 dtCWRKS)
-
-dtDATA  <- merge(dtWERKS[, .(LWRKS, WERKS)], 
-                 dtDATA, 
-                 all.y = TRUE, by = "LWRKS")
+# # Introduce dummy stores for closed stores which are not in iSYnergy
+# dtCWRKS <- dtWERKS[is.na(WERKS)]
+# dtCWRKS <- dtCWRKS[, WERKS:= paste0(pLGCINDC, 
+#                                     str_pad(1:nrow(dtCWRKS), 3, pad ="0"))]
+# 
+# dtWERKS <- rbind(dtWERKS[!is.na(WERKS)],
+#                  dtCWRKS)
+# 
+# dtDATA  <- merge(dtWERKS[, .(LWRKS, WERKS)], 
+#                  dtDATA, 
+#                  all.y = TRUE, by = "LWRKS")
 
 ```
 
@@ -185,18 +263,18 @@ dtDATA  <- merge(dtWERKS[, .(LWRKS, WERKS)],
 
 
 dtDATA <- dtDATA[,
-                 .(RECORDMODE, WERKS, CALDAY, REGHR,
+                 .(RECORDMODE, PLANT, CALDAY, REGHR,
                    IN1       , OUT1 , IN2   , OUT2 )]
 
 write.table(dtDATA, file = file.path("c:", "FTP", "GVBNL_KLNTTLR.csv"),
             quote = TRUE     , sep = ";", na = "", dec = ".",             
             row.names = FALSE, col.names = TRUE, append = FALSE)
 
-write.table(dtWERKS, file = file.path(".", "RAW_DATA", "GVBNL_WERKS.csv"),
-            quote = TRUE     , sep = ";", na = "", dec = ".",             
-            row.names = FALSE, col.names = TRUE, append = FALSE)
-
-write.table(dtCWRKS, file = file.path(".", "RAW_DATA", "GVBNL_CWRKS.csv"),
-            quote = TRUE     , sep = ";", na = "", dec = ".",             
-            row.names = FALSE, col.names = TRUE, append = FALSE)
+# write.table(dtWERKS, file = file.path(".", "RAW_DATA", "GVBNL_WERKS.csv"),
+#             quote = TRUE     , sep = ";", na = "", dec = ".",             
+#             row.names = FALSE, col.names = TRUE, append = FALSE)
+# 
+# write.table(dtCWRKS, file = file.path(".", "RAW_DATA", "GVBNL_CWRKS.csv"),
+#             quote = TRUE     , sep = ";", na = "", dec = ".",             
+#             row.names = FALSE, col.names = TRUE, append = FALSE)
 ```

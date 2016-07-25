@@ -1,0 +1,121 @@
+---
+title: "GrandVision - Visitor Counter"
+author: "F.J.Padt"
+date: "`r Sys.Date()`"
+output: 
+   pdf_document:
+    toc:             true
+    toc_depth:       2
+    number_sections: true
+    fig_caption:     true
+    fig_crop:        true
+    highlight:       tango    
+---
+
+\newpage
+![Logo](http://www.grandvision.com/img/logoGV.png) 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r RSetup, echo=FALSE, eval=TRUE, cache=FALSE, results='hide'}
+
+rm(list=ls())
+gc()
+
+source('../QAR/00_RProj/00_Global/iSynGeneral.R')
+
+
+# Data Settings
+fECHO    <- TRUE
+fEVAL    <- TRUE
+fRESULTS <- 'hide' 
+fIMAGE   <- TRUE 
+
+# # SAP systems to use
+pECC_SYST <- "RP1"
+pECC_CLNT <- "300"
+pBI_SYST  <- "BP1"
+pBI_CLNT  <- "300"
+pLGCINDC  <- "C"
+
+# Data Settings
+pOPCO     <- "UKNL"
+pARTGRP   <- c("")
+pROWS     <- -1L
+pSMALL    <- 1000
+pEXMP     <- 50 
+pEXP      <- FALSE
+pPath     <- "./60_Results" 
+pXLSX     <- paste0(pOPCO, "_VC_", pARTGRP) 
+# pEXPORT   <- paste0("POS_HISTORY" , ".csv") 
+
+# Open Excel for storing results
+if(file.exists(paste0(pPath, "/", pXLSX, ".xlsx")) == TRUE){
+   file.remove(paste0(pPath, "/", pXLSX, ".xlsx"))
+}
+
+fWriteToSheet(data.frame(ECCSYST = pECC_SYST, 
+                         ECCCLNT = pECC_CLNT,
+                         BI_SYST = pBI_SYST ,
+                         BI_CLNT = pBI_CLNT), 
+              pPath, pXLSX, "PARAM", pAppend = FALSE )
+```
+
+## Visitor counter Analysis
+
+```{r Setup}
+dtVCA <- fGetOHDTable(pTableName = "VCA", pAddHeader = TRUE, 
+                      pSystID = "BP1", pClient = "300" )
+dtVCA <- dtVCA[CALYEAR != "2000"]
+
+vFEXCL <- c("G1TIME"   , "RECORDMODE", "G1AVTRD1"   , "G1AVTRD2" , "VTYPE"     , 
+            "VERSION"  , "G1TMSTMP"  , "CALMONTH"   , "CALMONTH2", "CALQUARTER", 
+            "CALQUART1", "FISCPER"   , "FISCPER3"   , "FISCYEAR" , "FISCVARNT" ,
+            "HALFYEAR" , "HALFYEAR1" , "DISTR_CHAN" , "G1CSIND1" , "G1CSIND2"  ,
+            "G1COUTD1" , "G1COUTD2"  , "PSTNG_DATE")
+dtVCA <- dtVCA[, setdiff(names(dtVCA), vFEXCL), with=FALSE]
+
+dtVCA[, `:=`(G1VC = (as.numeric(G1AVGDR1) + as.numeric(G1AVGDR2))/2)]
+dtVCA[, `:=`(G1AVGDR1 = NULL, G1AVGDR2 = NULL)]
+
+dtPWDT <- dtVCA[, .(PWDT = sum(G1VC), OPEN = "Y"), by = .(PLANT, WEEKDAY1, G1TMCNT)]
+dtPWDT[PWDT == 0, OPEN:= "N" ]
+
+setkey(dtVCA, "COMPANY", "PLANT", "CALYEAR")
+dtPL <- unique(dtVCA[,.(COMPANY, PLANT, CALYEAR)])
+dtPL <- dtPL[, .(STORES = .N), by = .(COMPANY, CALYEAR)]
+
+# dtVCA[, `:=`(AV = mean(G1VC), SD = sd(G1VC)), 
+#       by = .(COMPANY, PLANT, CALYEAR, CALWEEK, WEEKDAY1, CALDAY)]
+
+dtVCAT <- dtVCA[, .(PDVC = sum(G1VC)), by = .(PLANT, CALDAY, COMPANY, CALYEAR)]
+dtVCAT[, PD:= 1]
+dtVCAT[PDVC == 0, PD:= 0]
+# dtVCAT <- dtVCAT[PDVC != 0]
+dtVCAT <- dtVCAT[, .(TPVC = sum(PDVC), TPD = sum(PD), 
+                     avgVC = round(sum(PDVC)/ sum(PD), 0)), 
+                 by = .(COMPANY, CALYEAR)]
+
+dtVCAT <- dtPL[dtVCAT, on=c("COMPANY", "CALYEAR")]
+
+fWriteToSheet(dtVCAT, 
+              pPath, pXLSX, "VCA", pAppend = FALSE )
+####################
+
+dtVCH <- fGetOHDTable(pTableName = "VCH", pAddHeader = TRUE, 
+                      pSystID = "BP1", pClient = "300" )
+
+vFEXCL <- c("G1TIME"   , "RECORDMODE", "G1AVTRD1"   , "G1AVTRD2" , "VTYPE"     , 
+            "VERSION"  , "G1TMSTMP"  , "CALMONTH"   , "CALMONTH2", "CALQUARTER", 
+            "CALQUART1", "FISCPER"   , "FISCPER3"   , "FISCYEAR" , "FISCVARNT" ,
+            "HALFYEAR" , "HALFYEAR1" , "DISTR_CHAN" , "PSTNG_DATE")
+dtVCH <- dtVCH[, setdiff(names(dtVCH), vFEXCL), with=FALSE]
+
+dtVCH[, `:=`(G1CSIND1 = as.numeric(G1CSIND1), G1COUTD1 = as.numeric(G1COUTD1),
+             G1CSIND2 = as.numeric(G1CSIND2), G1COUTD2 = as.numeric(G1COUTD2),
+             G1AVGDR1 = as.numeric(G1AVGDR1), G1AVGDR2 = as.numeric(G1AVGDR2))]
+
+```
+

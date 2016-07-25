@@ -1159,7 +1159,7 @@ rm(dtDS)
 ```
 
 
-```{r NewLink}
+```{r NewLink_MGH2}
 # read TD + MD Article; 
 # Join article
 # aggregate by receipt and MGH2, 
@@ -1181,6 +1181,7 @@ dtMD <- dtMD[, .(MATERIAL, RPA_WGH2)]
 setnames(dtMD, c("RPA_WGH2"), c("WGH"))
 setkey(dtMD, "MATERIAL")
 
+# Put WGH in transaction data in order to join in next step
 dtUKa <- dtMD[dtUK[, .(BILL_NUM, MATERIAL)], on="MATERIAL"][, .N, by = .(BILL_NUM, WGH)]
 
 dtUKa <- dtWGH[dtUKa, on="WGH"]
@@ -1191,8 +1192,38 @@ dtUKa <- dtUKa[, G1WGHCMB:= sum(BIT), by = .(BILL_NUM)][, .N, by =.(BILL_NUM, G1
 
 dtUK <- dtUKa[dtUK, on="BILL_NUM"]
 dtUK[, `:=`(N = NULL)]
-dtDS <- fGetDS()
-dtUK <- dtUK[, dtDS[DATASOURCE == "G1_DS_PA_HIST_FLAT_FILE", FIELDNM], with = FALSE]
+rm(dtUKa)
+
+### AAGCMB #####
+dtAAG      <- fread("c:/SAPexport/KTGRM.csv")
+dtAAG      <- dtAAG[, .(KTGRM, BIT)] 
+setnames(dtAAG, c("KTGRM"), c("AAG"))
+
+dtMTSLS      <- fGetEXPTable(pTable  = "#BI0#PMAT_SALES", pKey = c("MAT_SALES","SALESORG","DISTR_CHAN"),
+                             pSystID = "BP1", pClient = "300")
+dtMTSLS      <- dtMTSLS[MAT_SALES != "" & SALESORG != "" & DISTR_CHAN != "" & G1KTGRM != "", 
+                        .(SALESORG, DISTR_CHAN, MAT_SALES, G1KTGRM)]
+setnames(dtMTSLS, c("G1KTGRM", "MAT_SALES"), c("AAG", "MATERIAL"))
+
+# Put AAG in transaction data in order to join in next step
+dtUKa <- dtMTSLS[dtUK[, .(BILL_NUM, MATERIAL, DISTR_CHAN, SALESORG)], 
+                 on= c("MATERIAL", "DISTR_CHAN", "SALESORG")][, .N, by = .(BILL_NUM, AAG)]
+
+dtUKa <- dtAAG[dtUKa, on="AAG"]
+setcolorder(dtUKa, c("BILL_NUM", "AAG", "BIT", "N"))
+setkey(dtUKa, "BILL_NUM", "AAG")
+
+dtUKa <- dtUKa[, G1AAGCMB:= sum(BIT), by = .(BILL_NUM)][, .N, by =.(BILL_NUM, G1AAGCMB)]
+
+dtUK <- dtUKa[dtUK, on="BILL_NUM"]
+dtUK[, `:=`(N = NULL)]
+rm(dtUKa)
+
+### Prepare for Export ####
+dtUK <- fAlignDS(pDT =  dtUK, pDS = "G1_DS_PA_HIST_FLAT_FILE")
+
+# dtDS <- fGetDS()
+# dtUK <- dtUK[, dtDS[DATASOURCE == "G1_DS_PA_HIST_FLAT_FILE", FIELDNM], with = FALSE]
 
 write.table(dtUK, 
             file = file.path("c:", "FTP", pEXPORT),

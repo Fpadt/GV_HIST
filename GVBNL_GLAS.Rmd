@@ -107,7 +107,7 @@ dtGLAS <- data.table(
   FPR7       = character(0), 
   FPR8       = character(0), 
   FRX        = character(0), 
-  ORDERTYPE  = character(0)
+  OrderType  = character(0)
 )
 
 for (vFILE in dtFILES){
@@ -176,7 +176,7 @@ for(j in 9:24){
 setkeyv(dtGLAS, names(dtGLAS)[1:8] )
 dtGLAS <- dtGLAS[, lapply(.SD, sum), .SDcols=9:24, 
                  by = .(G1LGSTNO, BILL_NUM, G1LINKV, 
-                        SLSDATE, ORDERDAY, RPA_DRC, G1LGART, ORDERTYPE)]
+                        SLSDATE, ORDERDAY, RPA_DRC, G1LGART, OrderType)]
 
 summary(dtGLAS)
 # coding to find outliers
@@ -212,7 +212,6 @@ dtGLAS[, `:=` (
   G1LINKV        = NA,
   G1LGSTNO       = str_pad(G1LGSTNO, 3, pad ="0", side = "left"),
   RETTRCOST      = RETPRCOST,
-  RPA_TTC        = 0,                                              # To be filled
   ORGSCCOST      = 0,
   G1NTSLINT      = NETTO,
   G1LISLINT      = BRUTO + TOESLAG,  
@@ -399,6 +398,36 @@ gc()
 save.image(file = paste0("GLAS", format(today(), "%Y%m%d"), "_Article", ".RData" ))
 ```
 
+# meeting 20160721
+1. 
+2. GLAS - GARZ met negatieve quantity moet naar 0 gezet worden voor alles
+3. GLAS - negatieve quantity moet alles negatief worden
+4. ordertype vertalen naar SAP term voor alle FRAM en Lensen
+5. GLAS - aggregern op BON+ Article
+6. line items creeren op totale file 
+
+```{r ordertype, message=TRUE, warning=TRUE}
+dtORDTYP <- fread("./RAW_DATA/ORDERTYPE.csv")[, .(OrderType, RPA_TTC)]
+setnames(dtGLAS, "RPA_TTC", "OrderType")
+dtGLAS <- dtORDTYP[dtGLAS, on = "OrderType"]
+dtGLAS[, OrderType:=NULL]
+
+fSetNeg <- function(x){
+  if(x > 0){ x  <-  -1*x }
+  return(x)
+}
+
+indx_i <- which(dtGLAS$QUANTITY < 0)
+for(j in c(16L:21L, 23L, 24L)){
+  set(x = dtGLAS, i = indx_i , j = j, value = -1*as.numeric(abs(dtGLAS[indx_i, j, with = FALSE])) )   
+}
+
+indx_i <- which(dtGLAS$QUANTITY < 0 & dtGLAS$RPA_TTC == "Z307")
+for(j in c(13L, 16L:21L, 23L, 24L)){
+  set(x = dtGLAS, i = indx_i , j = j, value = 0)  
+}
+
+```
 
 ```{r  Missing2, echo=fECHO, eval=fEVAL}
 
@@ -497,65 +526,65 @@ write.table(dtDUMMY,
 
 
 ```{r Frames_spectales}
-# read Material
-library(data.table)
-
-t1 <- Sys.time()
-pEXPORT <- "test.csv"
-dtMAT <- fread("c:/FTP/BA1_MATERIAL.txt"    , sep=";", colClasses = "character", select = c("V1", "V48"))
-setnames(dtMAT, c("MATERIAL", "MGH2"))
-setkey(dtMAT, "MATERIAL")
-
-# Read History
-dtDAT <- fread("c:/FTP/GVBNL_POS_HISTORY_NL.csv", sep=",", colClasses = "character", drop = c("G1LOFLAG", "G1SPECFG"))
-setkey(dtDAT, "MATERIAL")
-vNames <- names(dtDAT)
-
-# JOIN MGH2
-dtDAT <- dtMAT[dtDAT] # on = "MATERIAL" 
-
-# set Key to BILL_NUM for supercharged calculations
-system.time(setkey(dtDAT, BILL_NUM))
-
-vLNS <- c("100")
-vSPC <- c("130", "140")
-
-system.time(
-  dtDAT[, c("G1LOFLAG2", "G1SPECFG2" ) := 
-          .((MGH2 %in% vLNS  & !any(MGH2 %in% vSPC)),   # Lens no Frames on the same ticket
-            ( (MGH2 %in% vLNS & any(MGH2 %in% vSPC)) |  # Lens    Frames on the same ticket 
-              (MGH2 %in% vSPC & any(MGH2 %in% vLNS))    # Frame   Lenses on the same ticket
-            )
-          ),  
-        by = BILL_NUM]) #[, MGH2:= NULL])  
-
-system.time(setkey(dtDAT , G1LOFLAG2))
-system.time(dtDAT[.(TRUE), G1LOFLAG:= "X"][, G1LOFLAG2:= NULL])
-
-system.time(setkey(dtDAT , G1SPECFG2))
-system.time(dtDAT[.(TRUE), G1SPECFG:= "X"][, G1SPECFG2:= NULL])
-
-# Create Example to show result
-vTST <- c("H141217167", "H141217168" , "H141217169", "H141217229")
-# dtDT <- dtDAT[.(vTST), .(MGH2, BILL_NUM)]
-vLNS  <- dtDAT[G1LOFLAG == "X",                   BILL_NUM][1:100]
-vSPC  <- dtDAT[G1SPECFG == "X",                   BILL_NUM][1:100]
-vFRM  <- dtDAT[is.na(G1SPECFG) & is.na(G1LOFLAG), BILL_NUM][1:100]
-dtEXP <- dtDAT[BILL_NUM %in% c(vLNS, vSPC, vFRM)][order(BILL_NUM)]
-dtEXP <- dtMAT[dtEXP, on = "MATERIAL"]
-rm(dtMAP, dtMAT)
-
-fWriteToSheet(dtEXP, 
-              pPath, "SPECFRAM", "Example-Large", pAppend = FALSE )
-
-write.table(dtDAT, 
-              file = file.path("c:", "FTP", pEXPORT),
-              quote = TRUE     , sep = ",", na = "", dec = ".",             
-              row.names = FALSE, col.names = TRUE, append = FALSE)
-
-t2 <- Sys.time()
-difftime(t2 ,t1)
-View(dtDAT)
+# # read Material
+# library(data.table)
+# 
+# t1 <- Sys.time()
+# pEXPORT <- "test.csv"
+# dtMAT <- fread("c:/FTP/BA1_MATERIAL.txt"    , sep=";", colClasses = "character", select = c("V1", "V48"))
+# setnames(dtMAT, c("MATERIAL", "MGH2"))
+# setkey(dtMAT, "MATERIAL")
+# 
+# # Read History
+# dtDAT <- fread("c:/FTP/GVBNL_POS_HISTORY_NL.csv", sep=",", colClasses = "character", drop = c("G1LOFLAG", "G1SPECFG"))
+# setkey(dtDAT, "MATERIAL")
+# vNames <- names(dtDAT)
+# 
+# # JOIN MGH2
+# dtDAT <- dtMAT[dtDAT] # on = "MATERIAL" 
+# 
+# # set Key to BILL_NUM for supercharged calculations
+# system.time(setkey(dtDAT, BILL_NUM))
+# 
+# vLNS <- c("100")
+# vSPC <- c("130", "140")
+# 
+# system.time(
+#   dtDAT[, c("G1LOFLAG2", "G1SPECFG2" ) := 
+#           .((MGH2 %in% vLNS  & !any(MGH2 %in% vSPC)),   # Lens no Frames on the same ticket
+#             ( (MGH2 %in% vLNS & any(MGH2 %in% vSPC)) |  # Lens    Frames on the same ticket 
+#               (MGH2 %in% vSPC & any(MGH2 %in% vLNS))    # Frame   Lenses on the same ticket
+#             )
+#           ),  
+#         by = BILL_NUM]) #[, MGH2:= NULL])  
+# 
+# system.time(setkey(dtDAT , G1LOFLAG2))
+# system.time(dtDAT[.(TRUE), G1LOFLAG:= "X"][, G1LOFLAG2:= NULL])
+# 
+# system.time(setkey(dtDAT , G1SPECFG2))
+# system.time(dtDAT[.(TRUE), G1SPECFG:= "X"][, G1SPECFG2:= NULL])
+# 
+# # Create Example to show result
+# vTST <- c("H141217167", "H141217168" , "H141217169", "H141217229")
+# # dtDT <- dtDAT[.(vTST), .(MGH2, BILL_NUM)]
+# vLNS  <- dtDAT[G1LOFLAG == "X",                   BILL_NUM][1:100]
+# vSPC  <- dtDAT[G1SPECFG == "X",                   BILL_NUM][1:100]
+# vFRM  <- dtDAT[is.na(G1SPECFG) & is.na(G1LOFLAG), BILL_NUM][1:100]
+# dtEXP <- dtDAT[BILL_NUM %in% c(vLNS, vSPC, vFRM)][order(BILL_NUM)]
+# dtEXP <- dtMAT[dtEXP, on = "MATERIAL"]
+# rm(dtMAP, dtMAT)
+# 
+# fWriteToSheet(dtEXP, 
+#               pPath, "SPECFRAM", "Example-Large", pAppend = FALSE )
+# 
+# write.table(dtDAT, 
+#               file = file.path("c:", "FTP", pEXPORT),
+#               quote = TRUE     , sep = ",", na = "", dec = ".",             
+#               row.names = FALSE, col.names = TRUE, append = FALSE)
+# 
+# t2 <- Sys.time()
+# difftime(t2 ,t1)
+# View(dtDAT)
 
 
 
@@ -569,4 +598,6 @@ Link Value	Description
 3	Invoice where Merchandise Categories not equal to Merchandise Category Level 2 100 - Frame Lenses and 110 - Contact Lenses 
 4	Invoice where Merchandise Category Level 2 110 - Contact Lenses in combination with Merchandise Category Level 2 not equal to 120 – Contact Lens Solutions (ie. Sale of Contact Lenses and a sunglass on one invoice)
 5	Invoice where Merchandise Category Level 2 110 - Contact Lenses in combination with Merchandise Category Level 2 120 – Contact Lens Solutions 
+
+
 

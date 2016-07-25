@@ -24,10 +24,12 @@ gc()
 
 source('../QAR/00_RProj/00_Global/iSynGeneral.R')
 
+
 # Data Settings
-fECHO    <- FALSE
+fECHO    <- TRUE
 fEVAL    <- TRUE
 fRESULTS <- 'hide' 
+fIMAGE   <- TRUE 
 
 # SAP systems to use
 pECC_SYST <- "RP1"
@@ -69,13 +71,12 @@ dtMEAN       <- fGetEXPTable(pTable  = "MEAN", pKey = c("MATNR", "MEINH"),
                              pSystID = pECC_SYST, pClient = pECC_CLNT)
 dtMEAN       <- dtMEAN[, MATNR:= as.character(MATNR)]
 
-# setnames(dtMEAN, "EAN11", "G1LGART")
-# Site Related
-# dtADRC       <- fGetEXPTable(pTable  = "ADRC", 
-#                              pSystID = "RP1", pClient = "300")
-# 
-# dtT001W      <- fGetEXPTable(pTable  = "T001W", pKey = c("WERKS"),
-#                              pSystID = "RP1", pClient = "300")
+# MAT_SALES for Account assignment Group
+
+
+dtTVKMT      <- fGetEXPTable(pTable  = "TVKMT", pKey = c("KTGRM"),
+                             pSystID = pECC_SYST, pClient = "300")
+dtTVKMT      <- dtTVKMT[ SPRAS == "E", .(KTGRM, VTEXT)]
 
 dtPLANT      <- fGetEXPTable(pTable  = "#BI0#PPLANT",
                              pKey    = "PLANT",
@@ -86,19 +87,9 @@ setnames(dtPLANT, gsub("^/BIC/", "", colnames(dtPLANT)  ))
 dtPLANTT    <- fread(input = "./RAW_DATA/GVBNL_PLANTT.csv", sep = ";",
                      colClasses = "character", stringsAsFactors = FALSE)
 
-# dtSDP_BLX    <- fread(file.path(".", "RAW_DATA", "SDP_BLX.csv"), 
-#                       sep=";", colClasses = "character")
-# setkey(dtSDP_BLX, "WERKS")
-# dtSDP_BLX[, `:=`(DISTR_CHAN = "10", G1LGSTNO = NULL)]
-
 #Load transactional data
 dtDATA     <- fread(file.path(".", "RAW_DATA", "GVBLX_HIST.txt"),  
                     sep = ";", nrows = pROWS, colClasses="character") 
-# dtDATA     <- dtDATA[article_group %in% pARTGRP, ]
-
-# dtDATA       <- fread(file.path(".", "RAW_DATA", "ttSalesHist.prd.20150720.csv"), 
-#                     sep=";", colClasses="character")
-# dtDATA <- dtDATA[, ART:= gsub("\"", "", dtDATA[1]$Art.nr.)]
 
 l_months <- sort(unique(substr(dtDATA$invoice_date, 1, 6)))
 dtMonths <- dtDATA[, .N, by=.(substr(dtDATA$invoice_date, 1, 6))]
@@ -110,28 +101,12 @@ setnames(
     "link"        , "quantity"      , "discount"       , 
     "tax_amount"  , "cost_amount"   , "net_sales_incl_tax",
     "wholesale_price"),
-  c("CALDAY"     , "G1LGSTNO"       , "BILL_NUM"       , 
+  c("CALDAY"      , "G1LGSTNO"      , "BILL_NUM"       , 
     "RPA_TTC"     , "MATNR"         , "RPA_DRC"        , 
     "G1LINKV"     , "QUANTITY"      , "G1DISCIT"       , 
     "TAX_AMOUNT"  , "RETPRCOST"     , "NSITX",
     "RETTRCOST"))
 
-# dtNLCL <- unique(dtDATA[, .(MATNR, article_group)])
-# setnames(dtNLCL, c("MATNR", "article_group"), c("LMTNR", "TYPE"))
-# 
-# setnames(dtMEAN, "EAN11", "LMTNR")
-# 
-# dtNLCL <- merge(dtNLCL, dtMEAN[EANTP == "Z1", .(MATNR, LMTNR)],
-#                 by = "LMTNR", all.x = TRUE)
-# setnames(dtMEAN, "LMTNR", "EAN11")
-# 
-# setkey(dtNLCL, "MATNR")
-# save(dtNLCL, file = "dtNLCL.RData")
-# 
-# write.table(dtNLCL, 
-#             file = "C:/FTP/GVBNL_NLCL.csv",
-#             quote = TRUE     , sep = ";", na = "", dec = ".",             
-#             row.names = FALSE, col.names = TRUE, append = FALSE)
 ```
 
 # Historical Data #
@@ -147,32 +122,31 @@ Records: `r nrow(dtDATA)`
 ## Source Data 
 
 ```{r PrepareDataSet, echo=fECHO, eval=fEVAL, results=fRESULTS}
-# check for Invalid Article numbers 
-# 20160128 - 2178 records
+# check for Invalid Article numbers and replace those
+# 20160530 -> 25 records
+dtTMP01 <- dtDATA[MATNR == "00000000"]
+fWriteToSheet(dtTMP01, 
+              pPath, pXLSX, "MATNR_00000000", pAppend = TRUE)
+dtDATA <- dtDATA[MATNR %in% dtTMP01$MATNR,  MATNR:= "CL0000"]
+
+# 20160530 -> 2178 records
 dtTMP01 <- dtDATA[MATNR  == " " |
                   MATNR  == ""  |  
                   (MATNR == 0)  ] 
-
-nrow(dtDATA)
-dtDATA <- dtDATA[MATNR %in% dtTMP01$MATNR, MATNR:= "GVBNL0000000000000"]
-nrow(dtDATA)
-
 fWriteToSheet(dtTMP01, 
               pPath, pXLSX, "MATNR_MISSING", pAppend = TRUE)
 
-# recode MATNR 00000000 to Z00000000 temporarily as leading zero's are removed 
-dtDATA <- dtDATA[MATNR == "00000000", MATNR:= "Z00000000"]
+# en het lijkt allemaal ‘drukwerk’ te betreffen.
+# Alles mag dus naar 180181 – Office printed
+dtDATA <- dtDATA[MATNR %in% dtTMP01$MATNR, MATNR:= "NL0000"]
 
 # remove leading zero's
-dtDATA <- dtDATA[, MATNR:= gsub("(^|[^0-9])0+", "\\1", MATNR, perl = TRUE)]
-
-# recode MATNR 00000000 to Z00000000 temporarily as leading zero's are removed 
-dtDATA <- dtDATA[MATNR == "Z00000000", MATNR:= "00000000"]
+dtDATA <- dtDATA[, MATNR:= sub("^0+", "", MATNR, perl = TRUE)]
 
 gc()
-
-save(dtDATA, file = "NLCL20160428.RData" )
-save.image(file = paste0("NLCL", format(today(), "%Y%m%d"), "_PrepareDataSet", ".RData" ))
+if(fIMAGE){save.image(file = paste0("NLCL", 
+                                    format(today(), "%Y%m%d"), 
+                                    "_PrepareDataSet", ".RData" ))}
 ```
 
 Below the structure of the source data and the number of records is displayed
@@ -183,7 +157,6 @@ str(dtDATA)
 head(dtDATA[, c(1:7)             , with = FALSE])
 head(dtDATA[, c(8 :ncol(dtDATA)) , with = FALSE])
 
-# fWriteToSheet(as.data.frame(str(dtDATA)), pFILE, "Structure", pAppend = TRUE)
 fWriteToSheet(head(dtDATA[1:pEXMP]), 
                pPath, pXLSX, "EXAMPLE_DATA_BEFORE"   , pAppend = TRUE)
 ```
@@ -228,9 +201,9 @@ fWriteToSheet(head(dtDATA[1:pEXMP]),
 # save(dtDATA, file = paste0("dtDATA_", pARTGRP, ".RData"))
 
 gc()
-
-save(dtDATA,file = "NLCL20160428.RData" )
-save.image(file = paste0("NLCL", format(today(), "%Y%m%d"), "_ChangeDataTypes", ".RData" ))
+if (fIMAGE){save.image(file = paste0("NLCL", 
+                                     format(today(), "%Y%m%d"), 
+                                     "_ChangeDataTypes", ".RData" ))}
 ```
 
 ### Data Preparation
@@ -242,13 +215,12 @@ Finally non-existing key figures or set to 0.
 ```{r displayDetailMean2, echo=fECHO, eval=fEVAL, results='markup'}
 str(dtDATA)
 head(dtDATA)
-# save.image(file = "intermed.RData")
-# load(file = "intermed.RData")
+
 ```
 
 ### Data Source
 
-```{r LegacyStoreToSAP, echo=fECHO, results=fRESULTS}
+```{r LegacyStoreToSAP, echo=fECHO, eval=fEVAL, results=fRESULTS}
 
 dtPLANT     <- dtPLANT[PLANTCAT == "A" & !(substr(PLANT, 1, 1) %in% c("Y", "Z"))
                        ][, `:=`(PLANTCAT = NULL, SYSTID = NULL)]
@@ -295,123 +267,63 @@ system.time(
   dtDATA <- dtPLANT[dtDATA, roll = TRUE, rollends = TRUE, 
                on = c("G1LGSTNO", "CALDAY")])
 
-save(dtDATA,file = "NLCL20160428.RData" )
-save.image(file = paste0("NLCL", format(today(), "%Y%m%d"), "_LegacyStoreToSAP", ".RData" ))
-# rm(dtTMP02, dtTMP03, dtTMP04, dtPLANT, dtPLANTT)
-
-
-
-# ---------------------------------------------------------
-# # only relevant Sites
-# dtPLANT <- dtPLANT[!PLANT   %in% c("0000", "")]
-# 
-# # Allign with ECC Logic
-# dtPLANT <- dtPLANT[nchar(G1LGSTNO) != 4 & 
-#                    !is.na(G1LGSTNO) &
-#                      G1LGSTNO != ""]
-# 
-# l_G1LGSTNO <- unique(substr(dtDATA$WERKS, 2, 4))
-# dtTMP11    <- data.frame(DIFF = setdiff(l_G1LGSTNO      , dtPLANT$G1LGSTNO))  # In sales but not in master data
-# dtTMP12    <- data.frame(DIFF = setdiff(dtPLANT$G1LGSTNO, l_G1LGSTNO))        # In master data but not in Sales
-# # # add the iSynergy Store next to the legacy store
-# # setnames(dtADRC, "ADDRNUMBER", "ADRNR")
-# # 
-# # dtWERKS  <- merge(dtT001W[ , .(ADRNR, WERKS, VKORG, VTWEG, VLFKZ)], 
-# #                   dtADRC[  , .(ADRNR, SORT2)],
-# #                   all.x = TRUE, by = "ADRNR")
-# # 
-# # # Select only NL stores
-# # dtWERKS  <- dtWERKS[substr(VKORG, 1, 2) %in% c("NL", "BE")] 
-# # 
-# # # Remove stores which are not Mapped
-# # dtWERKS <- dtWERKS[SORT2 == "", SORT2 := NA]
-# # dtTMP01  <- dtWERKS[ is.na(SORT2)][, SORT2:= NULL]
-# # fWriteToSheet(dtTMP01, 
-# #               pPath, pXLSX, "WERKS_NO_SORT2", pAppend = TRUE )
-# # 
-# # dtWERKS  <- dtWERKS[!is.na(SORT2)] 
-# 
-# # Add Sales Org from list which include the closed Stores
-# dtSDP_01 <- copy(dtSDP_BLX[, SORT2:= substr(WERKS, 2, 4)])
-# setnames(dtSDP_01, c("WERKS"), c("G1LGSTNO"))
-# fWriteToSheet(dtSDP_01, 
-#               pPath, pXLSX, "LegacyStore_incl_Closed", pAppend = TRUE )
-# 
-# dtWERKS   <- merge(dtWERKS, 
-#                    dtSDP_01, 
-#                    all.y = TRUE, by = "SORT2" )
-# 
-# # stores With Sales
-# dtTMP03 <- dtWERKS[!(G1LGSTNO %in% unique(dtDATA$G1LGSTNO))]
-# fWriteToSheet(dtTMP03, 
-#               pPath, pXLSX, "WERKS_WO_SLS", pAppend = TRUE )
-# 
-# dtWERKS <- dtWERKS[G1LGSTNO %in% unique(dtDATA$G1LGSTNO)]
-# 
-# # Quality check on Duplicates
-# dtWERKS  <- dtWERKS[, DUP:= duplicated(dtWERKS, by = "SORT2")]
-# 
-# dtTMP02  <- copy(dtWERKS)
-# dtTMP02  <- dtTMP02[, DUP:= any(DUP)          , by = "SORT2" ]
-# dtTMP02  <- dtTMP02[DUP == TRUE ]
-# fWriteToSheet(dtTMP02, 
-#               pPath, pXLSX, "WERKS_DUP", pAppend = TRUE )
-# fWriteToSheet(dtWERKS[DUP == TRUE], 
-#               pPath, pXLSX, "G1LGSTNO_DEL", pAppend = TRUE )
-# 
-# dtWERKS  <- dtWERKS[DUP == FALSE][, DUP:=NULL]
-# dtWERKS  <- dtWERKS[, .(WERKS, G1LGSTNO, SALESORG, DISTR_CHAN)]
-# 
-# # Add the iSynergy Site to the Data Set based upon Legacy site  
-# setnames(dtDATA, c("WERKS"), c("G1LGSTNO"))
-# 
-# # Create List of Dummy stores which are not used
-# setnames(dtPLANT, c("/BIC/G1LGSTNO"), c("G1LGSTNO"))
-# l_DUMMIES_USED <- dtPLANT[substr(PLANT,1,1) == pLGCINDC, .(PLANT, G1LGSTNO)]
-# l_DUMMIES_LIST <- paste0(pLGCINDC, str_pad(1:1000, 3, pad ="0"))
-# l_DUMMIES_LIST <- setdiff(l_DUMMIES_LIST, l_DUMMIES_USED )
-# 
-# # Introduce dummy stores for closed stores which are not in iSYnergy
-# l_WERKS <- nrow(dtWERKS[is.na(WERKS)])
-# dtWERKS <- dtWERKS[is.na(WERKS), 
-#                    WERKS:= paste0(pLGCINDC, 
-#                                   str_pad(100:(99 + l_WERKS), 3, pad ="0"))]
-# fWriteToSheet(dtWERKS, 
-#               pPath, pXLSX, "SITE_MAPPING", pAppend = TRUE )
-# 
-# dtDATA  <- merge(dtWERKS, dtDATA, 
-#                  all.y = TRUE, by = "G1LGSTNO")
-
+gc()
+if (fIMAGE){save.image(file = paste0("NLCL", 
+                                     format(today(), "%Y%m%d"), 
+                                     "_LegacyStoreToSAP", ".RData" ))}
 
 ```
 
-## Store Mapping
+## Article Mapping
 
-Following Stores could not be mapped and are removed from the store Master Data:
+```{r LegacyArticleMapping, echo=fECHO, eval=fEVAL}
+# enhance the MEAN table with Reference articles and dummies
+# this table can then be used to map teh articles in the sales data set
 
-```{r Non-Mapped_Stores, echo=fECHO, eval=fEVAL, results=fRESULTS}
-# dtTMP01
-# dtTMP02
-# 
-# rm(dtWERKS , dtPLANT , dtADRC , dtT001W, 
-#    dtTMP01 , dtTMP02 , dtTMP03, dtTMP04, 
-#    dtSDP_VE, dtSDP_01, l_DUMMIES_USED)
-# gc()
 ```
+
 
 
 ```{r LegacyArticleToSAP, echo=fECHO, eval=fEVAL }
+
+
 # add the iSynergy Article next to the legacy article
-dtMATNR <- dtMEAN[MEINH == "ST" & 
+dtMEANR3 <- dtMEAN[MEINH == "ST" & 
                   EANTP == "Z1" &
                   EAN11 != "DUPLICATE", 
                   .(MATNR, EAN11, EANTP)]
-setnames(dtMATNR, c("EAN11"), c("LMTNR"))
+setnames(dtMEANR3, c("EAN11"), c("LMTNR"))
+setkey(dtMEANR3, "MATNR", "LMTNR", "EANTP")
+dtMEANR3 <- unique(dtMEANR3)
 
-# Quality check on Duplicates
-dtMATNR  <- dtMATNR[, DUP:= duplicated(dtMATNR, by = "LMTNR")]
+# Additional Mapping Mean NL - using iSynergy articles as Reference
+dtMEANNL <- fread("./RAW_DATA/MEAN_NL.csv", colClasses = "character")
+dtMEANNL[, MATNR:= str_pad(string = MATNR, width = 18, side = "left", pad = "0")]
+setkey(dtMEANNL, "MATNR", "LMTNR", "EANTP")
+dtMEANNL <- unique(dtMEANNL)
 
-dtTMP03  <- copy(dtMATNR)
+if (length(intersect(dtMEANR3$LMTNR, dtMEANNL$LMTNR))>0){
+  warning(paste("Overlapping", length(intersect(dtMEANR3$LMTNR, dtMEANNL$LMTNR)), "records" ))}
+dtMEANR3 <- rbind(dtMEANR3, dtMEANNL)
+
+# Additional Mapping Mean GL - using iSynergy articles as Reference
+dtMEANGL <- fread("./RAW_DATA/Gl_MAPPING.csv", colClasses = "character")
+dtMEANGL[, EANTP:="Z1"]
+setnames(dtMEANGL, "MATERIAL", "MATNR")
+dtMEANGL[, MATNR:= str_pad(string = MATNR, width = 18, side = "left", pad = "0")]
+dtMEANGL <- dtMEANGL[!LMTNR %in% dtMEANR3$LMTNR]
+setkey(dtMEANGL, "MATNR", "LMTNR", "EANTP")
+dtMEANGL <- unique(dtMEANGL)
+
+if (length(intersect(dtMEANR3$LMTNR, dtMEANGL$LMTNR))>0){
+  warning(paste("Overlapping", length(intersect(dtMEANR3$LMTNR, dtMEANGL$LMTNR)), "records" ))}
+dtMEANR3 <- rbind(dtMEANR3, dtMEANGL)
+setkey(dtMEANR3, "LMTNR")
+
+# Quality check MEAN on Duplicates
+dtMEANR3  <- dtMEANR3[, DUP:= duplicated(dtMEANR3, by = "LMTNR")]
+# 60
+dtTMP03  <- copy(dtMEANR3)
 setkey(dtTMP03, "LMTNR", "MATNR")
 dtTMP03  <- dtTMP03[, DUPA:= any(DUP)          , by = "LMTNR" ]
 dtTMP03  <- dtTMP03[DUPA == TRUE ]
@@ -423,121 +335,50 @@ dtTMP04 <- dtTMP03[LMTNR %in% unique(dtDATA[MATNR %in% dtTMP03$LMTNR]$MATNR) ]
 fWriteToSheet(dtTMP04, 
               pPath, pXLSX, "DOUBLES_W_SLS", pAppend = TRUE )
 
-# take out doubles with & without Sales
+# take out 32 doubles with & without Sales
 dtTMP05 <- dtTMP03[DUP == TRUE, .(MATNR, LMTNR)][, DEL:= "X"]
 setkey(dtTMP05, "MATNR", "LMTNR")
-setkey(dtMATNR, "MATNR", "LMTNR")
-dtMATNR  <- dtTMP05[dtMATNR][is.na(DEL), .(MATNR, LMTNR)]
+setkey(dtMEANR3, "MATNR", "LMTNR")
+dtMEANR3  <- dtTMP05[dtMEANR3][is.na(DEL), .(MATNR, LMTNR)]
 
 # Rename MATNR -> LMTNR
 setnames(dtDATA, c("MATNR"), c("LMTNR"))
 
-# All Articles from MEAN With Sales (28811)
-dtMATNR <- dtMATNR[LMTNR %in% unique(dtDATA$LMTNR)]
+# All Articles from MEAN With Sales (29424)
+dtMEANR3 <- dtMEANR3[LMTNR %in% unique(dtDATA$LMTNR)]
 
-# Aricles which are not Migrated
-dtDUMMY <- data.table(LMTNR = setdiff(unique(dtDATA$LMTNR), unique(dtMATNR$LMTNR)))
+# Articles which need a dummy 13432
+dtDUMMY <- data.table(LMTNR = setdiff(unique(dtDATA$LMTNR), unique(dtMEANR3$LMTNR)))
 fWriteToSheet(dtDUMMY, 
               pPath, pXLSX, "NON_MIGRATED_W_SALES", pAppend = TRUE )
 
 
-# Make Dummy Mapping
-# Master data of Legacy Articles to create DUMMY
+# Get Master Data of Legacy Aricles to Create Dummies
 dtLMTNR <- fread("./RAW_DATA/GVBNL_LMTNR.csv", colClasses = "character")
 setkey(dtLMTNR, "LMTNR")
 
-dtMAT_DUM <- dtLMTNR[, DUMMY:= .GRP, 
-                   by = .(MATL_TYPE, RPA_WGH3, RF_BNDID, G1RIM, G1FRMSHP, G1ITMTYP, PRCBND, TGTGRP) ]
-dtMAT_DUM[, MATERIAL:= paste0("DNL", str_pad(DUMMY,width = 15, pad="0"))]
-setkey(dtMAT_DUM, "MATERIAL")
+# check whether no additiona dummies are needed
+dtLMTNR <- dtLMTNR[!LMTNR %in% dtMEANR3$LMTNR]
+if (length(intersect(dtMEANR3$LMTNR, dtLMTNR$LMTNR))>0){
+  warning(paste("Overlapping", nrow(dtDUMMY>0), "dummies needed" ))}
 
-#dtMAT_DUM = MD for 0MATERIAL Upload
-dtMAT_DUM <- dtMAT_DUM[, .N, 
-                     by = .(MATERIAL, MATL_TYPE, RPA_WGH3, RF_BNDID, G1RIM, G1FRMSHP, G1ITMTYP)][, N:=NULL]
-
-dtMAT_DUM <- dtMAT_DUM[, `:=`(RPA_WGH1   = "ENTERPRIS",
-                              RPA_WGH2   = substr(RPA_WGH3, 1, 3), 
-                              MATL_GROUP = RPA_WGH3
-                              )
-                       ]
-# align dataset with DS
-dtMAT_DUM <- fAlignDS(pDT =  dtMAT_DUM, pDS = "G1_DS_MD_0MATERIAL")
-
-# check If any Articles are both Dummy and in Mean
-# dtTMP06 <- data.table(DUMMY_MISSING    = setdiff(unique(dtDUMMY$LMTNR)  , unique(dtLMTNR$LMTNR)))
-# dtTMP07 <- data.table(MEAN_NOT_DUMMY   = setdiff(unique(dtLMTNR$LMTNR)  , unique(dtDUMMY$LMTNR)))
-# dtTMP08 <- data.table(LMTNR_AND_DUMMY  = intersect(unique(dtLMTNR$LMTNR), unique(dtDUMMY$LMTNR)))
-# dtTMP09 <- data.table(MATNR_AND_LMTNR  = intersect(unique(dtMATNR$LMTNR), unique(dtLMTNR$LMTNR)))
-
-dtLMTNR <- dtLMTNR[!LMTNR %in% unique(dtMATNR$LMTNR)]
+# check whether no additiona dummies are needed
 dtDUMMY <- dtDUMMY[!LMTNR %in% unique(dtLMTNR$LMTNR)]
+if (nrow(dtDUMMY)>0){
+  warning(paste("Overlapping", length(intersect(dtMEANR3$LMTNR, dtLMTNR$LMTNR)), "records" ))}
 
-# Missing Dummies
-lTMP07 <- setdiff(unique(dtLMTNR$LMTNR), unique(dtDUMMY$LMTNR) )
-lTMP08 <- setdiff(unique(dtTMP06$LMTNR), unique(dtLMTNR$LMTNR) )
+# Master data of Legacy Articles to create DUMMY
+dtMAT_DUM <- dtLMTNR[, DUMMY:= .GRP, 
+                     by = .(MATL_TYPE, RPA_WGH3, RF_BNDID, G1RIM, G1FRMSHP, G1ITMTYP, PRCBND, TGTGRP) ]
+dtMAT_DUM[, MATNR:= paste0("DNL", str_pad(DUMMY,width = 15, pad="0"))]
+setkey(dtMAT_DUM, "MATNR")
 
-dtTMP07 <- dtDATA[LMTNR %in% lTMP08, sum(QUANTITY), by= .(LMTNR, article_group)]
-dtTMP07 <- dtTMP07[article_group == "CL", `:=`(MATNR = "DNL0000000000000CL")]
-dtTMP07 <- dtTMP07[article_group == "NL", `:=`(MATNR = "DNL0000000000000NL")]
+dtMATNR <- rbind(dtMEANR3, dtMAT_DUM[, .(MATNR, LMTNR)])
 
-dtDUM_UKN <- data.table(
-  MATERIAL   = c("DNL0000000000000CL", "DNL0000000000000NL"),
-  RPA_WGH1   = "ENTERPRIS",
-  RPA_WGH2   = c("110", "130")
-)
-
-# align dataset with DS
-dtDUM_UKN <- fAlignDS(pDT =  dtDUM_UKN, pDS = "G1_DS_MD_0MATERIAL")
-
-dtDM_GL <- data.table(MATERIAL   = c("DNL000000000900263", 
-                                     "DNL000000000900268", 
-                                     "DNL000000000900277",
-                                     "DNL000000000900276"),
-                      MATL_TYPE  = "Z002",                      
-                      RPA_WGH1   = "ENTERPRIS",
-                      RPA_WGH2   = "100",
-                      RPA_WGH3   = c("100101", 
-                                     "100103",
-                                     "100102",
-                                     "100104"),
-                      MATL_GROUP = c("100101", 
-                                     "100103",
-                                     "100102",
-                                     "100104")
-)
-
-# align dataset with DS
-dtDM_GL <- fAlignDS(pDT =  dtDM_GL, pDS = "G1_DS_MD_0MATERIAL")
-
-dt0MAT_DUM <- rbind(dtMAT_DUM, dtDUM_UKN, dtDM_GL)
-
+# Join Sales data
 dtDATA <- dtMATNR[dtDATA, on = "LMTNR"]
-# fWriteToSheet(dtTMP07, 
-#               pPath, pXLSX, "NON_MIGRATED_W_SALES3", pAppend = TRUE )
-
-write.table(dt0MAT_DUM, 
-            file = "C:/FTP/GVBNL_DUMMY.csv",
-            quote = TRUE     , sep = ";", na = "", dec = ".",             
-            row.names = FALSE, col.names = TRUE, append = FALSE)
-
-# Create the Complete MAterial Mapping Table
-# MEAN, DUMMY, UNKNOWN & GLAS
-setnames(dtDUMMY, c("MATERIAL"), c("MATNR"))
-dtDUMMY <- dtDUMMY[, names(dtMATNR), with = FALSE]
-dtTMP07 <- dtTMP07[, names(dtMATNR), with = FALSE]
-
-dtMATNR <- rbind(dtMATNR, dtDUMMY, dtTMP07)
-dtMATNR <- dtMATNR[, DUP := duplicated(dtMATNR, by = "LMTNR")]
-dtMATNR <- dtMATNR[, DUPA:= any(DUP), by = "LMTNR" ]
-dtMATNR <- dtMATNR[!(DUPA == TRUE & substr(MATNR,1,3) == "DNL")]
-
-# Map Material Again
-dtDATA[, MATNR:=NULL]
-dtDATA  <- dtMATNR[dtDATA, on = "LMTNR"]
-
-
-# fWriteToSheet(dtDATA[is.na(MATNR)], 
-#               pPath, pXLSX, "NON_MIGRATED_SALES", pAppend = TRUE )
+if (any(is.na(dtDATA$MATNR))){
+  warning(paste("Still Dummies needed!", length(is.na(dtDATA$MATNR)), "articles" ))}
 
 vTQ  <- sum(as.numeric(dtDATA$QUANTITY))
 vPMQ <- 100 * sum(as.numeric(dtDATA[!is.na(MATNR)]$QUANTITY), na.rm = TRUE)/vTQ
@@ -547,104 +388,97 @@ vTN  <- sum(as.numeric(dtDATA$NSITX))
 vPMN <- 100 * sum(as.numeric(dtDATA[!is.na(MATNR)]$NSITX), na.rm = TRUE)/vTN
 vPNN <- 100 * sum(as.numeric(dtDATA[ is.na(MATNR)]$NSITX), na.rm = TRUE)/vTN
 
-save.image(file = paste0("NLCL", format(today(), "%Y%m%d"), "_LegacyArticleToSAP", ".RData" ))
+if(fIMAGE){save.image(file = paste0("NLCL", 
+                                    format(today(), "%Y%m%d"), 
+                                    "_LegacyArticleToSAP", ".RData" ))}
 
-dtNLCL <- dtDATA
-save(dtNLCL, file = paste0("NLCL", format(today(), "%Y%m%d"), ".RData"))
-
-rm(dtMATNR, dtMEAN)
 gc()
 ```
 
+
+
 ```{r  Missing, echo=fECHO, eval=fEVAL}
-# MISSING !!!!
-# dtDATA[, `:=`(DOC_CURRCY     =  "EUR",
-#               UNIT           =   "ST",
-#               RETAILTYPECODE =    NA
-#                )]   # Original SC COGS
-
-dtLMT_SALES <- dtDATA[is.na(MATNR), .N, by = .(LMTNR, SALESORG, DISTR_CHAN )]
-# join with Mapping FILE
-dtLMT_SALES <- dtDUMMY[dtLMT_SALES, on="LMTNR"]
-# dtLMTERIAL  <- dtDATA[is.na(MATNR), .N, by = .(LMTNR)]
-
-# if(pARTGRP == "NL"){
-#   dtNAV      <- data.table(NAV = c("30" , "32" , "35" , "37" , "40" , "70"),
-#                            RPA_WGH2 = c("130", "130", "140", "140", "120", "110")) 
-#   dtLMTERIAL <- dtLMTERIAL[, NAV:= substr(LMTNR, 1, 2)]
-#   setkey(dtLMTERIAL, "NAV")
-#   dtLMTERIAL <- dtNAV[dtLMTERIAL, on = "NAV"]
-#   
-#   dtLMTERIAL <- dtLMTERIAL[is.na(RPA_WGH2), RPA_WGH2:= "170"]
-#   dtLMTERIAL <- dtLMTERIAL[, DADD:= 0]
-# } else if(pARTGRP == "CL") { 
-#   dtLMTERIAL <- dtLMTERIAL[, RPA_WGH2:= "110"]
-#   dtLMTERIAL <- dtLMTERIAL[, DADD:= 1000]
-# }
+# # MISSING !!!!
+# # dtDATA[, `:=`(DOC_CURRCY     =  "EUR",
+# #               UNIT           =   "ST",
+# #               RETAILTYPECODE =    NA
+# #                )]   # Original SC COGS
 # 
-# dtLMTERIAL <- dtLMTERIAL[, DUMMY:= .GRP, by = .(RPA_WGH2) ]
-# if (length(pARTGRP) == 1){dtLMTERIAL <- dtLMTERIAL[, DUMMY:= DUMMY + DADD ][, DADD:= NULL]}
-# dtLMTERIAL <- dtLMTERIAL[, DUMMY:= paste0("DNL", 
-#                                           str_pad(DUMMY, width = 15, pad="0"))]
-
-# setnames(dtDUMMY, "G1LGART", "LMTNR" )
-fWriteToSheet(dtLMTERIAL, 
-              pPath, pXLSX, "DUMMIES", pAppend = TRUE )
-
-dtMATERIAL <- dtLMTERIAL[, .N, by = .(DUMMY, RPA_WGH2)][, N:=NULL]
-setnames(dtMATERIAL, "DUMMY", "MATERIAL")
-setkey(dtMATERIAL, "MATERIAL")
-
-dtLMTERIAL <- dtLMTERIAL[,          .(LMTNR, DUMMY)]
-setkey(dtLMTERIAL, "LMTNR")
-
-dtMAT_SALES <- dtLMTERIAL[dtLMT_SALES, on = "LMTNR"]
-dtMAT_SALES <- dtMAT_SALES[, .N, by = .(DUMMY, SALESORG, DISTR_CHAN)][, N:=NULL]
-setnames(dtMAT_SALES, "DUMMY", "MATERIAL")
-setkey(dtMAT_SALES, "MATERIAL", "DISTR_CHAN", "SALESORG")
-
-dtDATA <- dtLMTERIAL[dtDATA, on = "LMTNR"]
-dtDATA <- dtDATA[is.na(MATNR), MATNR:= DUMMY][, DUMMY:= NULL]
+# dtLMT_SALES <- dtDATA[is.na(MATNR), .N, by = .(LMTNR, SALESORG, DISTR_CHAN )]
+# # join with Mapping FILE
+# dtLMT_SALES <- dtDUMMY[dtLMT_SALES, on="LMTNR"]
+# # dtLMTERIAL  <- dtDATA[is.na(MATNR), .N, by = .(LMTNR)]
+# 
+# # if(pARTGRP == "NL"){
+# #   dtNAV      <- data.table(NAV = c("30" , "32" , "35" , "37" , "40" , "70"),
+# #                            RPA_WGH2 = c("130", "130", "140", "140", "120", "110")) 
+# #   dtLMTERIAL <- dtLMTERIAL[, NAV:= substr(LMTNR, 1, 2)]
+# #   setkey(dtLMTERIAL, "NAV")
+# #   dtLMTERIAL <- dtNAV[dtLMTERIAL, on = "NAV"]
+# #   
+# #   dtLMTERIAL <- dtLMTERIAL[is.na(RPA_WGH2), RPA_WGH2:= "170"]
+# #   dtLMTERIAL <- dtLMTERIAL[, DADD:= 0]
+# # } else if(pARTGRP == "CL") { 
+# #   dtLMTERIAL <- dtLMTERIAL[, RPA_WGH2:= "110"]
+# #   dtLMTERIAL <- dtLMTERIAL[, DADD:= 1000]
+# # }
+# # 
+# # dtLMTERIAL <- dtLMTERIAL[, DUMMY:= .GRP, by = .(RPA_WGH2) ]
+# # if (length(pARTGRP) == 1){dtLMTERIAL <- dtLMTERIAL[, DUMMY:= DUMMY + DADD ][, DADD:= NULL]}
+# # dtLMTERIAL <- dtLMTERIAL[, DUMMY:= paste0("DNL", 
+# #                                           str_pad(DUMMY, width = 15, pad="0"))]
+# 
+# # setnames(dtDUMMY, "G1LGART", "LMTNR" )
+# fWriteToSheet(dtLMTERIAL, 
+#               pPath, pXLSX, "DUMMIES", pAppend = TRUE )
+# 
+# dtMATERIAL <- dtLMTERIAL[, .N, by = .(DUMMY, RPA_WGH2)][, N:=NULL]
+# setnames(dtMATERIAL, "DUMMY", "MATERIAL")
+# setkey(dtMATERIAL, "MATERIAL")
+# 
+# dtLMTERIAL <- dtLMTERIAL[,          .(LMTNR, DUMMY)]
+# setkey(dtLMTERIAL, "LMTNR")
+# 
+# dtMAT_SALES <- dtLMTERIAL[dtLMT_SALES, on = "LMTNR"]
+# dtMAT_SALES <- dtMAT_SALES[, .N, by = .(DUMMY, SALESORG, DISTR_CHAN)][, N:=NULL]
+# setnames(dtMAT_SALES, "DUMMY", "MATERIAL")
+# setkey(dtMAT_SALES, "MATERIAL", "DISTR_CHAN", "SALESORG")
+# 
+# dtDATA <- dtLMTERIAL[dtDATA, on = "LMTNR"]
+# dtDATA <- dtDATA[is.na(MATNR), MATNR:= DUMMY][, DUMMY:= NULL]
 
 ```
 
 ```{r EXPORT, echo=fECHO, eval=fECHO}
-dtDS <- fGetDS()
-
 setnames(dtDATA,
          c("CALDAY" , "LMTNR"    , "MATNR"   , "NSITX"),
          c("SLSDATE", "G1LGART"  , "MATERIAL", "G1NTSLINT")
          )
 
-setdiff(names(dtDATA), dtDS[DATASOURCE == "G1_DS_PA_HIST_FLAT_FILE", FIELDNM])
-setdiff(dtDS[DATASOURCE == "G1_DS_PA_HIST_FLAT_FILE", FIELDNM] , names(dtDATA))
-
 # Select and Order the fields in the same order as the DataSource
-# dtDATA <- dtDATA[, dtDS$FIELDNM, with = FALSE]
-dtDATA <- dtDATA[, dtDS[DATASOURCE == "G1_DS_PA_HIST_FLAT_FILE", FIELDNM], with = FALSE]
+dtDATA <- fAlignDS(pDT =  dtDATA, pDS = "G1_DS_PA_HIST_FLAT_FILE")
+
+# dtGLAS <- fread("c:/FTP/GVBNL_GLAS.csv")
 
 write.table(dtDATA, file = file.path("c:", "FTP", paste0("GVBNL", "_", pARTGRP, ".csv")),
             quote = TRUE     , sep = ",", na = "", dec = ".",             
             row.names = FALSE, col.names = TRUE, append = FALSE)
+```
 
-# Select and Order the fields in the same order as the DataSource
-dtMATERIAL_EXP <- data.table("MATERIAL"       = dtMATERIAL$MATERIAL,
-                             "MATL_TYPE"      = NA,
-                             "RPA_WGH1"       = "ENTERPRIS",
-                             "RPA_WGH2"       = dtMATERIAL$RPA_WGH2,
-                             "RPA_WGH3"       = NA,
-                             "MATL_GROUP"     = NA,
-                             "RF_BNDID"       = NA,
-                             "/BIC/G1BRNDTY"  = NA,
-                             "/BIC/G1COLOR"   = NA,
-                             "/BIC/G1REFINX1" = NA, 
-                             "/BIC/G1LENCTY"  = NA,
-                             "/BIC/G1TRANS"   = NA,  
-                             "/BIC/G1POLAR"   = NA )
-# dtMATERIAL <- dtMATERIAL[, intersect(names(dtMATERIAL), dtDS[DATASOURCE == "G1_DS_MD_0MATERIAL", FIELDNM]), 
-#                          with = FALSE]
+```{r EXPORT_DUMMY}
+# dt0MAT_DUM = MD for 0MATERIAL Upload
+# align dataset with DS
+dt0MAT_DUM <-  unique(dtMAT_DUM[, .(MATNR, MATL_TYPE, RPA_WGH3, RF_BNDID, G1RIM, G1FRMSHP, G1ITMTYP) ],
+                      by=NULL)
 
-write.table(dtMATERIAL_EXP, file = file.path("c:", "FTP", paste0("0MATERIAL", "_", pARTGRP, ".csv")),
+dt0MAT_DUM <- dt0MAT_DUM[, `:=`(RPA_WGH1   = "ENTERPRIS",
+                                RPA_WGH2   = substr(RPA_WGH3, 1, 3), 
+                                MATL_GROUP = RPA_WGH3)
+                         ]
+dt0MAT_DUM <- fAlignDS(pDT =  dt0MAT_DUM, pDS = "G1_DS_MD_0MATERIAL")
+
+write.table(dt0MAT_DUM, 
+            file = "C:/FTP/GVBNL_DUMMY.csv",
             quote = TRUE     , sep = ";", na = "", dec = ".",             
             row.names = FALSE, col.names = TRUE, append = FALSE)
 
@@ -661,9 +495,92 @@ write.table(dtMATSALES_EXP, file = file.path("c:", "FTP", paste0("0MAT_SALES", "
             quote = TRUE     , sep = ";", na = "", dec = ".",             
             row.names = FALSE, col.names = TRUE, append = FALSE)
 
+```
+
+```{r NewLink_MGH2}
+# read TD + MD Article; 
+# Join article
+# aggregate by receipt and MGH2, 
+# Join dtWGH
+# aggregate sum(bit) by receipt, 
+# join sum back on receipt  
+source('../QAR/00_RProj/00_Global/iSynGeneral.R')
+
+dtWGH <- data.table(
+  WGH = as.character(seq(from=100, to= 190, by = 10)),
+  BIT = 2^(0:9))
+
+# dtNL1 <- fread("c:/FTP/GVBNL_CL.csv")
+# dtNL2 <- fread("c:/FTP/GVBNL_GLAS.csv")
+
+dtNL  <- rbind(fread("c:/FTP/GVBNL_CL.csv"), fread("c:/FTP/GVBNL_GLAS.csv"))
+#dtNLc <- fread("C:/FTP/3. CONLONS_POS_HISTORY.csv")
+dtMD <- fGetEXPTable(pTableName = "#BI0#PMATERIAL", 
+                     pSystID = "BP1", pClient = 300 )
+dtMD <- dtMD[, .(MATERIAL, RPA_WGH2)]
+setnames(dtMD, c("RPA_WGH2"), c("WGH"))
+setkey(dtMD, "MATERIAL")
+
+# Put WGH in transaction data in order to join in next step
+dtNLa <- dtMD[dtNL[, .(BILL_NUM, MATERIAL)], on="MATERIAL"][, .N, by = .(BILL_NUM, WGH)]
+
+dtNLa <- dtWGH[dtNLa, on="WGH"]
+setcolorder(dtNLa, c("BILL_NUM", "WGH", "BIT", "N"))
+setkey(dtNLa, "BILL_NUM", "WGH")
+
+dtNLa <- dtNLa[, G1WGHCMB:= sum(BIT), by = .(BILL_NUM)][, .N, by =.(BILL_NUM, G1WGHCMB)]
+
+dtNL <- dtNLa[dtNL, on="BILL_NUM"]
+dtNL[, `:=`(N = NULL)]
+rm(dtNLa)
+
+# Add Link value
+dtLNK <- fread("c:/FTP/WGH_COMB.csv")
+dtLNK <- dtLNK[, .(G1WGHCMB, LNK)]
+dtNL <-  dtLNK[dtNL, on = "G1WGHCMB"]
+dtNL[, G1LINKV:= NULL]
+setnames(dtNL, "LNK", "G1LINKV")
+
+
+### AAGCMB #####
+dtAAG      <- fread("c:/SAPexport/KTGRM.csv")
+dtAAG      <- dtAAG[, .(KTGRM, BIT)] 
+setnames(dtAAG, c("KTGRM"), c("AAG"))
+
+dtMTSLS      <- fGetEXPTable(pTable  = "#BI0#PMAT_SALES", pKey = c("MAT_SALES","SALESORG","DISTR_CHAN"),
+                             pSystID = "BP1", pClient = "300")
+dtMTSLS      <- dtMTSLS[MAT_SALES != "" & SALESORG != "" & DISTR_CHAN != "" & G1KTGRM != "", 
+                        .(SALESORG, DISTR_CHAN, MAT_SALES, G1KTGRM)]
+setnames(dtMTSLS, c("G1KTGRM", "MAT_SALES"), c("AAG", "MATERIAL"))
+
+# Put AAG in transaction data in order to join in next step
+dtNLa <- dtMTSLS[dtNL[, .(BILL_NUM, MATERIAL, DISTR_CHAN, SALESORG)], 
+                 on= c("MATERIAL", "DISTR_CHAN", "SALESORG")][, .N, by = .(BILL_NUM, AAG)]
+
+dtNLa <- dtAAG[dtNLa, on="AAG"]
+setcolorder(dtNLa, c("BILL_NUM", "AAG", "BIT", "N"))
+setkey(dtNLa, "BILL_NUM", "AAG")
+
+dtNLa <- dtNLa[, G1AAGCMB:= sum(BIT), by = .(BILL_NUM)][, .N, by =.(BILL_NUM, G1AAGCMB)]
+
+dtNL <- dtNLa[dtNL, on="BILL_NUM"]
+dtNL[, `:=`(N = NULL)]
+rm(dtNLa)
+
+### Prepare for Export ####
+dtNL <- fAlignDS(pDT =  dtNL, pDS = "G1_DS_PA_HIST_FLAT_FILE")
+
+# dtDS <- fGetDS()
+# dtNL <- dtNL[, dtDS[DATASOURCE == "G1_DS_PA_HIST_FLAT_FILE", FIELDNM], with = FALSE]
+
+write.table(dtNL, 
+            file = file.path("c:", "FTP", pEXPORT),
+            quote = TRUE     , sep = ",", na = "", dec = ".",             
+            row.names = FALSE, col.names = TRUE, append = FALSE)
 
 ```
 
+# From here only checks 
 
 ```{r displayResult, echo=fECHO, eval=fEVAL, results='markup'}
 any(is.na(dtDATA$MATERIAL))

@@ -143,4 +143,41 @@ View(lnk2)
 View(lnkc[TN %in% lnkc[LNK == "2A" & M140 > 0]$TN])
 lnk3 <- lnkc[, lapply(.SD, sum), by = c("LNK","TN"), .SDcols=4:13] 
 
+###### Generate AAGCMB
+dtKTGRM      <- fread("c:/SAPexport/KTGRM.csv")
 
+dtTVKMT      <- fGetEXPTable(pTable  = "TVKMT", pKey = c("KTGRM"),
+                             pSystID = pECC_SYST, pClient = "300")
+dtTVKMT      <- dtTVKMT[ SPRAS == "E", .(KTGRM, VTEXT)]
+
+x <- c(0, 1)
+dtIOBJ <- as.data.table(
+  expand.grid(list(Z1 = x * 2^0, 
+                   Z2 = x * 2^1, 
+                   Z3 = x * 2^2,
+                   Z4 = x * 2^3,
+                   Z5 = x * 2^4,
+                   Z6 = x * 2^5,
+                   Z7 = x * 2^6,
+                   Z8 = x * 2^7,
+                   Z9 = x * 2^8,
+                   ZA = x * 2^9, 
+                   ZB = x * 2^10,
+                   ZC = x * 2^11,
+                   ZD = x * 2^12,
+                   ZE = x * 2^13,
+                   ZF = x * 2^14,
+                   ZG = x * 2^15,
+                   ZH = x * 2^16)))
+
+dtIOBJ[, G1AAGCMB:=rowSums(.SD)]
+
+# for (col in 1:10) set(dtIOBJ, which(dtIOBJ[[col]] != 0), col, 1)
+dtIOBJ <- dtIOBJ[, lapply(.SD, as.character)]
+for (col in 1:17) set(dtIOBJ, which(dtIOBJ[[col]] != "0"), col, "Y")
+for (col in 1:17) set(dtIOBJ, which(dtIOBJ[[col]] == "0"), col, "N")
+
+setcolorder(dtIOBJ,  c("G1AAGCMB", setdiff(names(dtIOBJ), "G1AAGCMB")))
+
+write.table(x= dtIOBJ, file= "C:/FTP/AAG_COMB.csv", quote = TRUE, 
+            sep = ";", row.names = FALSE, col.names = TRUE)

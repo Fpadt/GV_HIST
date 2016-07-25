@@ -96,3 +96,43 @@ gc()
 "PLANT"    unique from TD ->       Sample from set with    replace DE & FR -> JOIN
 "BILL_NUM" unique from TD ->       recode                                  -> Join Back
 
+```{r ReplacePlantFRDE}
+# rm(list=ls())
+# gc()
+# 
+# source('../QAR/00_RProj/00_Global/iSynGeneral.R')
+
+dtDATA <- fread("c:/FTP/POS_HISTORY.csv")
+dtDATA[, G1LGSTNO:= NULL ]
+
+dtPLDEFR      <- fGetEXPTable(pTable  = "#BI0#PPLANT",
+                             pKey    = "PLANT",
+                             pSystID = "BTP", pClient = "300")
+
+dtPLDEFR <- dtPLDEFR[COUNTRY %in% c("DE","AT","FR") & 
+                   as.numeric(PLANT) > 1999 &
+                   as.numeric(PLANT) < 4000, .(PLANT, G1LGSTNO)]
+setnames(dtPLDEFR, "PLANT", "PLDEFR")
+# dtPLDEFR <- rbind(dtPLDEFR[1,], dtPLDEFR)
+# dtPLDEFR[1, `:=`(PLDEFR = "0000", G1LGSTNO = "0000")]
+
+dtUKNL <- data.table(PLANT = unique(dtDATA$PLANT))
+dtUKNL <- dtUKNL[, SLCT:= sample(c("X",""), nrow(dtUKNL), replace = TRUE) ]
+dtUKNL[, PLDEFR:= sample(dtPLDEFR$PLDEFR, nrow(dtUKNL), replace = TRUE)]
+dtUKNL <- dtPLDEFR[dtUKNL[SLCT == "X"], on="PLDEFR"][, SLCT:= NULL]
+
+# dtDATA[, PLANT:= sample(dtPLANT$PLANT, nrow(dtDATA), replace = TRUE, 
+#                         prob = c(0.5, rep(0.5/(nrow(dtPLANT)-1), 
+#                                           (nrow(dtPLANT)-1))))]
+
+dtDATA <- dtDATA[dtUKNL, on = "PLANT"]
+dtDATA[, `:=`(PLANT = NULL, DOC_CURRCY = "EUR")]
+setnames(dtDATA, "PLDEFR", "PLANT")
+
+dtDATA <- fAlignDS(pDT =  dtDATA, pDS = "G1_DS_PA_HIST_FLAT_FILE")
+
+write.table(dtDATA, file = file.path("c:", "FTP", paste0("POS_HISTORY", ".csv")),
+            quote = TRUE     , sep = ",", na = "", dec = ".",             
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+```
+

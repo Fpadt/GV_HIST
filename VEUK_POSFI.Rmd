@@ -1,0 +1,267 @@
+---
+title: "Legacy POS FI Sales - Vision Express UK - "
+author: "F.J.Padt"
+date: "`r Sys.Date()`"
+output: 
+   pdf_document:
+    toc:             true
+    toc_depth:       2
+    number_sections: true
+    fig_caption:     true
+    fig_crop:        true
+    highlight:       tango    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+\newpage
+![Logo](http://www.grandvision.com/img/logoGV.png) 
+
+[DESIGN](https://projects.gvshare.com/iSynergy/01_Release_1/06._Reporting/02._Design/01._FDs/R20_POS Sales - Margin/)
+
+```{r RSetup, echo=FALSE, eval=TRUE, cache=FALSE, results='hide'}
+
+rm(list=ls())
+gc()
+
+source('../QAR/00_RProj/00_Global/iSynGeneral.R')
+
+
+# Data Settings
+fECHO    <- TRUE
+fEVAL    <- TRUE
+fRESULTS <- 'hide' 
+fIMAGE   <- TRUE 
+
+# SAP systems to use
+pECC_SYST <- "RP1"
+pECC_CLNT <- "300"
+pBI_SYST  <- "BD1" 
+pBI_CLNT  <- "100"
+pLGCINDC  <- "C"
+
+# Data Settings
+pOPCO     <- "VEUK"
+pDS       <- "G1_DS_PA_TRAN_MOV_FIN_HIST"
+pROWS     <- -1L
+pSMALL    <- 1000
+pEXMP     <- 50 
+pEXP      <- FALSE
+pPath     <- "./60_Results" 
+pXLSX     <- paste0(pOPCO, "_POSFI_SALES_") 
+pEXPORT   <- paste0("POS_FI_HISTORY" , ".csv") 
+
+# Open Excel for storing results
+if(file.exists(paste0(pPath, "/", pXLSX, ".xlsx")) == TRUE){
+   file.remove(paste0(pPath, "/", pXLSX, ".xlsx"))
+}
+
+fWriteToSheet(data.frame(ECCSYST = pECC_SYST, 
+                         ECCCLNT = pECC_CLNT,
+                         BI_SYST = pBI_SYST ,
+                         BI_CLNT = pBI_CLNT), 
+              pPath, pXLSX, "PARAM", pAppend = FALSE )
+```
+
+```{r ReadRawData, echo=fECHO, eval=fEVAL}
+
+dtPLANT      <- fGetEXPTable(pTable  = "#BI0#PPLANT",
+                             pKey    = "PLANT",
+                             pSystID = "BP1", pClient = "300")
+# setnames(dtPLANT, gsub("^/BIC/", "", colnames(dtPLANT)  ))
+
+### Temporary deletion of Legacy closed
+# dtPLANT     <- dtPLANT[(!substr(PLANT, 1, 1) %in% c("H", "C")),]
+
+# dtSDP_VE    <- fread(file.path(".", "RAW_DATA", "SDP_VE.csv"), 
+#                 sep=";")
+# setkey(dtSDP_VE, "WERKS")
+
+#Load transactional data
+dtDATA     <- fread(file.path(".", "RAW_DATA", "VEUK_POSFI2.csv"),  
+                    sep = ";", nrows = pROWS, colClasses="character") 
+
+# setnames(
+#   dtDATA,
+#   c("CALDAY"         , "STORE"         , "NETT"),
+#   c("BUSINESSDAYDATE", "PLANT"         , "AMOUNT")
+# )
+
+```
+
+```{r Cleansing}
+dtDATA[AMOUNT == "", AMOUNT:= "0"]
+# dtDATA[, TST:= is.double(as.double(AMOUNT))]
+dtDATA[, AMOUNT:= as.double(AMOUNT)]
+
+dtDAT2 <- dtDATA[, `:=`(
+  RECORDQUALIFIER = RECORDQUALIFIER,      # can be 1000 or 1300
+  BWTRANSINDEX    = BWTRANSINDEX,
+  RETAILSTOREID   = str_pad(string = PLANT, width = "35", side="left", pad = "0"),
+  BUSINESSDAYDATE = BUSINESSDAYDATE,
+  TRANSTYPECODE   = TRANSTYPECODE,        # Z109, Z313, Z314, Z315
+  WORKSTATIONID   = "0000000001",         # WORKSTATIONID,
+  TRANSNUMBER     = TRANSNUMBER,
+  BEGINTIMESTAMP  = paste0(BUSINESSDAYDATE, "000000"),
+  ENDTIMESTAMP    = paste0(BUSINESSDAYDATE, "000000"),
+  DEPARTMENT      = DEPARTMENT,           # mostly empty
+  OPERATORQUAL    = OPERATORQUAL,
+  OPERATORID      = OPERATORID,           #
+  TRANSCURRENCY   = TRANSCURRENCY,        # filled by VEUK
+  PARTNERQUALIFIER= PARTNERQUALIFIER,     # empty
+  PARTNERID       = PARTNERID,            # empty
+  TRANSINDEX      = TRANSINDEX,           
+  NONCOMPFLAG     = NONCOMPFLAG,          # empty
+  TRANSTYPEGROUP  = TRANSTYPEGROUP,       # Z011, Z013, Z033
+  BUSINESSTYPE    = "3",                  # Always 3
+  REVERSALFLAG    = REVERSALFLAG,         # empty
+  TRANSDEBITFLAG  = TRANSDEBITFLAG,       #  "", "X" 
+  PLANT           = PLANT,
+  STORECURRENCY   = TRANSCURRENCY,
+  PLANTCUSTOMER   = PLANTCUSTOMER,        # NOT MAPPED IN TRANFORMATION
+  BUSINESSLOCATION= str_pad(string = PLANT, width = "10", side="left", pad = "0"),
+  TURNOVER        = TURNOVER,             # always 0
+  INDEXCURRENCY   = TRANSCURRENCY,
+  VERSION         = "000",
+  TASK_CANCELED   = TASK_CANCELED,        # NOT MAPPED IN TRANFORMATION
+  FINUMBER        = "0000000001",
+  FITYPECODE      = ifelse(sign(AMOUNT) == 1, "Z138", "Z139"),
+  ACCOUNTID       = ACCOUNTID,            # empty
+  ACCOUNTASSIGNOBJ= ACCOUNTASSIGNOBJ,     # NOT MAPPED IN TRANFORMATION
+  AMOUNT          = AMOUNT,
+  FICURRENCY      = FICURRENCY,           # NOT MAPPED IN TRANFORMATION
+  REFERERENCEID   = REFERERENCEID,        # ALWAYS EMPTY
+  FITYPEGROUP     = FITYPEGROUP,          # Z101, Z301, Z302, Z303
+  FIDEBITFLAG     = ifelse(sign(AMOUNT) == 1, "", "X"),
+  ZZDISCRSN       = ZZDISCRSN)            # ALWAYS EMPTY)
+  ]
+
+```
+
+
+# Historical Data #
+
+The historical data for `r pOPCO` is extracted from Legacy ePOS as one big data set. 
+This set is turned into a  subset of the standard SAP extractor 
+
+From:    `r min(dtDATA$SLSDATE)` 
+To:      `r max(dtDATA$SLSDATE)`
+Records: `r nrow(dtDATA)`
+
+## Source Data 
+
+```{r PrepareDataSet, echo=fECHO, eval=fEVAL, results=fRESULTS}
+
+# remove leading zero's
+# dtDATA <- dtDATA[, MATNR:= sub("^0+", "", MATNR, perl = TRUE)]
+
+dtDATA[, `:=` (RT_LOCATIO    = PLANT, 
+               RPA_TTC       = "Z999",
+               AMOUNT        = ifelse(is.na(AMOUNT), 0, 
+                                      as.numeric(sub(",", ".", AMOUNT))),
+               TRANSCURRENCY = "GBP"
+               )]
+
+if(fIMAGE){save.image(file = paste0("NLCL", 
+                                    format(today(), "%Y%m%d"), 
+                                    "_PrepareDataSet", ".RData" ))}
+```
+
+Below the structure of the source data and the number of records is displayed
+
+```{r displayDetailMean, echo=fECHO, eval=fEVAL, results='markup'}
+
+fWriteToSheet(head(dtDATA[1:pEXMP]), 
+               pPath, pXLSX, "EXAMPLE_DATA_BEFORE"   , pAppend = TRUE)
+```
+
+```{r ChangeDataTypes, echo=fECHO, eval=fEVAL, results=fRESULTS}
+# Change data Types and set NA to 0 !!!!  700secs. !!!!
+# system.time(
+#   dtDATA <- dtDATA[, `:=`(
+#     BILL_NUM       = paste0("H", 
+#                             str_pad(G1LGSTNO, 3, pad ="0", side = "left"), 
+#                             str_pad(BILL_NUM, 6, pad ="0", side = "left")),
+#     RPA_DRC        = toupper(x = RPA_DRC),
+#     G1LGSTNO       = str_pad(G1LGSTNO, 3, pad ="0"),
+#     QUANTITY       = ifelse(is.na(QUANTITY)  , 0, as.integer(QUANTITY)),
+#     NSITX          = ifelse(is.na(NSITX)     , 0, as.numeric(sub(",", ".", NSITX))),
+#     G1DISCIT       = ifelse(is.na(G1DISCIT)  , 0, as.numeric(sub(",", ".", G1DISCIT))),
+#     TAX_AMOUNT     = ifelse(is.na(TAX_AMOUNT), 0, as.numeric(sub(",", ".", TAX_AMOUNT))),
+#     RETPRCOST      = ifelse(is.na(RETPRCOST) , 0, as.numeric(sub(",", ".", RETPRCOST))), 
+#     ORGSCCOST      = ifelse(is.na(RETPRCOST) , 0, as.numeric(sub(",", ".", RETPRCOST))),
+#     RETTRCOST      = ifelse(is.na(RETTRCOST) , 0, as.numeric(sub(",", ".", RETTRCOST ))),
+#     DOC_CURRCY     = "EUR",
+#     UNIT           = "ST",
+#     RETAILTYPECODE =  NA,
+#     G1LISLINT      =  0,
+#     G1LOFLAG       =  NA,
+#     G1SPECFG       =  NA,
+#     G1WGHCMB       =  NA
+#     ) ]
+#   )
+# 
+# dtDATA <- dtDATA[, `:=`(NETVAL_INV = NSITX - TAX_AMOUNT)]
+# setkey(dtDATA, "BILL_NUM")
+
+
+fWriteToSheet(head(dtDATA[1:pEXMP]), 
+               pPath, pXLSX, "EXAMPLE_DATA_AFTER"   , pAppend = TRUE)
+
+gc()
+if (fIMAGE){save.image(file = paste0("NLCL", 
+                                     format(today(), "%Y%m%d"), 
+                                     "_ChangeDataTypes", ".RData" ))}
+```
+
+### Data Preparation
+
+### Data Source
+
+```{r LegacyStoreToSAP, echo=fECHO, eval=fEVAL, results=fRESULTS}
+
+# add the iSynergy Store next to the legacy store
+
+dtPLANT <- dtPLANT[SALESORG %in% c("", "GB13", "GB07", "IE11")]
+dtPLANT <- dtPLANT[!PLANT   %in% c("0000", "")]
+
+# Allign with ECC Logic
+dtPLANT <- dtPLANT[nchar(G1LGSTNO) != 4 & 
+                   !is.na(G1LGSTNO) &
+                     G1LGSTNO != ""]
+setkey(dtPLANT, PLANT)
+
+
+
+# Map the data Of the Legacy Stores
+system.time(
+  dtDATA <- dtPLANT[dtDATA, 
+               on = c("G1LGSTNO")])
+
+gc()
+if (fIMAGE){save.image(file = paste0("NLCL", 
+                                     format(today(), "%Y%m%d"), 
+                                     "_LegacyStoreToSAP", ".RData" ))}
+
+```
+
+
+```{r EXPORT, echo=fECHO, eval=fECHO}
+# setnames(dtDATA,
+#          c("CALDAY" , "LMTNR"    , "MATNR"   , "NSITX"),
+#          c("SLSDATE", "G1LGART"  , "MATERIAL", "G1NTSLINT")
+#          )
+
+# Select and Order the fields in the same order as the DataSource
+dtDAT3 <- fAlignDS(pDT =  dtDAT2, pDS = pDS, 
+                   pSystID = "BD1", pClient = "100")
+
+write.table(dtDAT3, file = file.path("c:", "FTP", paste0("POS_FI_HISTORY.csv")),
+            quote = TRUE     , sep = ";", na = "", dec = ".",             
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+# /usr/sap/BA1/FTP/POS/HISTORY/POS_FI_HISTORY.csv
+```
+

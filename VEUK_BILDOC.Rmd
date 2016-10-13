@@ -1,0 +1,177 @@
+---
+title: "VEUK_BILLDOC"
+author: "F.J.Padt"
+date: "12 oktober 2016"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+\newpage
+![Logo](http://www.grandvision.com/img/logoGV.png) 
+
+```{r RSetup, echo=FALSE, eval=TRUE, cache=FALSE, results='hide'}
+
+rm(list=ls())
+gc()
+
+source('../QAR/00_RProj/00_Global/iSynGeneral.R')
+
+
+# Data Settings
+fECHO    <- TRUE
+fEVAL    <- TRUE
+fRESULTS <- 'hide' 
+fIMAGE   <- TRUE 
+
+# SAP systems to use
+pECC_SYST <- "RP1"
+pECC_CLNT <- "300"
+pBI_SYST  <- "BP1" 
+pBI_CLNT  <- "300"
+pLGCINDC  <- "C"
+
+# Data Settings
+pOPCO     <- "VEUK"
+pDS       <- ""                     # Todo enter datasource for upload
+pROWS     <- -1L
+pSMALL    <- 1000
+pEXMP     <- 50 
+pEXP      <- FALSE
+pPath     <- "./60_Results" 
+pXLSX     <- paste0(pOPCO, "_BILDOC_") 
+pEXPORT   <- paste0("VEUK_BILDOC" , ".csv") 
+pTABLE    <- "G1SDPD22_20160602" 
+
+# Open Excel for storing results
+if(file.exists(paste0(pPath, "/", pXLSX, ".xlsx")) == TRUE){
+   file.remove(paste0(pPath, "/", pXLSX, ".xlsx"))
+}
+
+fWriteToSheet(data.frame(ECCSYST = pECC_SYST, 
+                         ECCCLNT = pECC_CLNT,
+                         BI_SYST = pBI_SYST ,
+                         BI_CLNT = pBI_CLNT ,
+                         TABNAM  = pTABLE), 
+              pPath, pXLSX, "PARAM", pAppend = FALSE )
+```
+
+```{r ReadRawData}
+dtUKBD <- fread("./RAW_DATA/VEUK_BD.csv", colClasses = "character")
+setnames(x = dtUKBD, "V1", "BILL_NUM")
+setkey(dtUKBD, BILL_NUM)
+dtUKBD[, UK:= "X"]
+
+dtSLS <- fGetOHDTable(pTableName = pTABLE, 
+                       pAddHeader = TRUE, pSystID = pBI_SYST, pClient = "300" )
+
+dtSLS <- dtSLS[SALESORG %in% c("GB07", "GB13", "IE11")]
+
+dtSHT01 <- dtSLS[, .(ITEMS = .N), by = .(BILL_NUM)]
+setkey(dtSHT01, BILL_NUM)
+fWriteToSheet(dtSHT01, 
+              pPath, pXLSX, "ALL_20160602", pAppend = TRUE )
+```
+
+```{r transform}
+
+fI2E <- function(x){
+
+  idx <- str_sub(x, -1, -1) == "-" 
+  x[idx] <- paste0("-", str_sub(x[idx], 1, nchar(x[idx])-1))
+
+  return(as.single(x))
+}
+
+fBIN <- function(x){
+  idx    <- (x-trunc(x)) > 0.46 & (x-trunc(x)) < 0.50
+  x[idx] <- x[idx] + 0.03
+  return(round(x))
+}
+
+# Get fieldnames of Key Figures
+vKYF <- fGetFieldNM(pTableName = pTABLE, pSystID = pBI_SYST, pTYPE = "KYF")
+
+# Make Numeric and move sign from last to first position 
+for (j in c(which(names(dtSLS) %in% vKYF))) set(dtSLS, j=j, value = fI2E(dtSLS[[j]]))
+
+# Create Copy and round the values so matching will work instead of rounding differences
+dtCHK <- copy(dtSLS)
+for (j in c(which(names(dtCHK) %in% vKYF))) {
+  set(dtCHK, j=j, 
+      value = fBIN(dtCHK[[j]]))
+}
+
+# identify the columns which are not equal although we have 2 double line
+vEXCL <- character(0)
+for(vDOC in c("9006424636", "9403183498")){
+  for (mat in unique(dtSLS[BILL_NUM == vDOC, MATERIAL])){
+    for (i in 1:dim(dtSLS)[2]){
+      dtTMP <- dtCHK[BILL_NUM == vDOC & MAT_SALES == mat , 
+                     i:i, with = FALSE]
+      if ( !any(duplicated(dtTMP))) {
+        vEXCL <- c(vEXCL, setdiff(names(dtCHK)[i], vEXCL))
+      }
+    }
+    print(c(vDOC, mat))
+    print(vEXCL)
+  }
+}
+print(vEXCL)
+
+# Don'take the POS lookup into account
+vEXCL <- c(vEXCL, "TAX_AMOUNT", "G1LOFLAG", names(dtSLS)[str_sub(names(dtSLS), 1, 4) == "RPA_"])
+# View(dtCHK[BILL_NUM == vDOC & MAT_SALES == mat , vEXCL, with=FALSE])
+# View(dtSLS[BILL_NUM == vDOC , c("BILL_NUM", "MATERIAL", vEXCL), with = FALSE]
+#      [order(BILL_NUM, MATERIAL, NET_VAL_S)]) # vEXCL
+
+# determine the maximum nummer of fields in the key which are the same
+# Note the rounding error in Net sales!!!
+# One of teh Duplicates will get True in the Fiels DUP
+vKEY  <- names(dtSLS)[!names(dtSLS) %in% vEXCL]
+setkeyv(dtCHK, vKEY )
+dtCHK <- dtCHK[, DUP:= duplicated(dtCHK)] 
+
+# Indicate a a of duplicates exist by DPP = TRUE
+dtCHK <- dtCHK[, DPP:= any(DUP), by = vKEY ]
+
+# Check if all items in BILL have a duplicate
+dtBIL <- dtCHK[, .(SB = sum(DPP), CB = .N), by = .(BILL_NUM)][, MATCH:= SB == CB]
+dtBIL <- dtUKBD[dtBIL, on="BILL_NUM"]
+
+dtBIL[is.na(UK), UK:= ""]
+dtBIL[MATCH == TRUE  &           UK == "X", RESULT:= "YUK&YCOE" ]
+dtBIL[MATCH == TRUE  &           UK != "X", RESULT:= "NUK&YCOE" ]
+dtBIL[MATCH == FALSE & SB == 0 & UK == "X", RESULT:= "YUK&NCOE" ]
+dtBIL[MATCH == FALSE & SB == 0 & UK != "X", RESULT:= "NUK&NCOE" ]
+dtBIL[MATCH == FALSE & SB >  0 & UK == "X", RESULT:= "YUK&PCOE" ]
+dtBIL[MATCH == FALSE & SB >  0 & UK != "X", RESULT:= "NUK&PCOE" ]
+
+# # Find all billing documents which have DPP = FALSE
+# dtTMP01 <- data.table(BILL_NUM = setdiff(unique(dtCHK[DPP ==F, BILL_NUM]), 
+#                                          unique(dtCHK[DPP ==T, BILL_NUM])))
+# dtTMP02 <- dtSLS[BILL_NUM %in% dtTMP01[, BILL_NUM], ]
+# 
+# fWriteToSheet(dtTMP01, 
+#               pPath, pXLSX, "NO_DOUBLES_HDR", pAppend = TRUE )
+# 
+# 
+# fWriteToSheet(dtTMP02, 
+#               pPath, pXLSX, "NO_DOUBLES_ITM", pAppend = TRUE )
+
+# Write To sheet teh Analsyis
+fWriteToSheet(dtBIL,
+              pPath, pXLSX, "ANALYSIS", pAppend = TRUE )
+
+dtSEL <- dtCHK[, .(BILL_NUM, BILL_ITEM, DUP, DPP)]
+dtSLS <- dtSEL[dtSLS, on=c("BILL_NUM", "BILL_ITEM")]
+dtSLS <- dtBIL[dtSLS, on="BILL_NUM"]
+
+write.table(x= dtSLS, file="c:/FTP/VEUK_ANA.csv", 
+            quote=TRUE, sep=";", row.names=FALSE)
+```
+
+11348

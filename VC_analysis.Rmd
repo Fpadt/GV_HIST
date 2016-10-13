@@ -25,7 +25,7 @@ rm(list=ls())
 gc()
 
 source('../QAR/00_RProj/00_Global/iSynGeneral.R')
-
+library(chron)
 
 # Data Settings
 fECHO    <- TRUE
@@ -74,11 +74,17 @@ vFEXCL <- c("G1TIME"   , "RECORDMODE", "G1AVTRD1"   , "G1AVTRD2" , "VTYPE"     ,
             "VERSION"  , "G1TMSTMP"  , "CALMONTH"   , "CALMONTH2", "CALQUARTER", 
             "CALQUART1", "FISCPER"   , "FISCPER3"   , "FISCYEAR" , "FISCVARNT" ,
             "HALFYEAR" , "HALFYEAR1" , "DISTR_CHAN" , "G1CSIND1" , "G1CSIND2"  ,
-            "G1COUTD1" , "G1COUTD2"  , "PSTNG_DATE")
+            "G1COUTD1" , "G1COUTD2"  , "PSTNG_DATE" , "CREATEDON")
 dtVCA <- dtVCA[, setdiff(names(dtVCA), vFEXCL), with=FALSE]
 
-dtVCA[, `:=`(G1VC = (as.numeric(G1AVGDR1) + as.numeric(G1AVGDR2))/2)]
+dtVCA[, `:=`(G1VC = (as.numeric(G1AVGDR1) + as.numeric(G1AVGDR2))/2,
+             CDATE = as.Date(CALDAY, format = "%Y%m%d"),
+             CTIME = chron(times=G1TMCNT))]
 dtVCA[, `:=`(G1AVGDR1 = NULL, G1AVGDR2 = NULL)]
+save(dtVCA, file= "./dtVCA.Rdata")
+
+# Week = strftime("2016-01-11", "%W")
+# weekday = strftime("2016-01-11", "%w")
 
 dtPWDT <- dtVCA[, .(PWDT = sum(G1VC), OPEN = "Y"), by = .(PLANT, WEEKDAY1, G1TMCNT)]
 dtPWDT[PWDT == 0, OPEN:= "N" ]
@@ -103,19 +109,22 @@ dtVCAT <- dtPL[dtVCAT, on=c("COMPANY", "CALYEAR")]
 fWriteToSheet(dtVCAT, 
               pPath, pXLSX, "VCA", pAppend = FALSE )
 ####################
+```
 
-dtVCH <- fGetOHDTable(pTableName = "VCH", pAddHeader = TRUE, 
-                      pSystID = "BP1", pClient = "300" )
+```{r VCH}
 
-vFEXCL <- c("G1TIME"   , "RECORDMODE", "G1AVTRD1"   , "G1AVTRD2" , "VTYPE"     , 
-            "VERSION"  , "G1TMSTMP"  , "CALMONTH"   , "CALMONTH2", "CALQUARTER", 
-            "CALQUART1", "FISCPER"   , "FISCPER3"   , "FISCYEAR" , "FISCVARNT" ,
-            "HALFYEAR" , "HALFYEAR1" , "DISTR_CHAN" , "PSTNG_DATE")
-dtVCH <- dtVCH[, setdiff(names(dtVCH), vFEXCL), with=FALSE]
-
-dtVCH[, `:=`(G1CSIND1 = as.numeric(G1CSIND1), G1COUTD1 = as.numeric(G1COUTD1),
-             G1CSIND2 = as.numeric(G1CSIND2), G1COUTD2 = as.numeric(G1COUTD2),
-             G1AVGDR1 = as.numeric(G1AVGDR1), G1AVGDR2 = as.numeric(G1AVGDR2))]
+# dtVCH <- fGetOHDTable(pTableName = "VCH", pAddHeader = TRUE, 
+#                       pSystID = "BP1", pClient = "300" )
+# 
+# vFEXCL <- c("G1TIME"   , "RECORDMODE", "G1AVTRD1"   , "G1AVTRD2" , "VTYPE"     , 
+#             "VERSION"  , "G1TMSTMP"  , "CALMONTH"   , "CALMONTH2", "CALQUARTER", 
+#             "CALQUART1", "FISCPER"   , "FISCPER3"   , "FISCYEAR" , "FISCVARNT" ,
+#             "HALFYEAR" , "HALFYEAR1" , "DISTR_CHAN" , "PSTNG_DATE")
+# dtVCH <- dtVCH[, setdiff(names(dtVCH), vFEXCL), with=FALSE]
+# 
+# dtVCH[, `:=`(G1CSIND1 = as.numeric(G1CSIND1), G1COUTD1 = as.numeric(G1COUTD1),
+#              G1CSIND2 = as.numeric(G1CSIND2), G1COUTD2 = as.numeric(G1COUTD2),
+#              G1AVGDR1 = as.numeric(G1AVGDR1), G1AVGDR2 = as.numeric(G1AVGDR2))]
 
 ```
 

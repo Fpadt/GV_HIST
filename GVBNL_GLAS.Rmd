@@ -412,14 +412,14 @@ setnames(dtGLAS, "RPA_TTC", "OrderType")
 dtGLAS <- dtORDTYP[dtGLAS, on = "OrderType"]
 dtGLAS[, OrderType:=NULL]
 
-fSetNeg <- function(x){
-  if(x > 0){ x  <-  -1*x }
-  return(x)
-}
+# fSetNeg <- function(x){
+#   if(x > 0){ x  <-  -1*x }
+#   return(x)
+# }
 
 indx_i <- which(dtGLAS$QUANTITY < 0)
 for(j in c(16L:21L, 23L, 24L)){
-  set(x = dtGLAS, i = indx_i , j = j, value = -1*as.numeric(abs(dtGLAS[indx_i, j, with = FALSE])) )   
+  set(x = dtGLAS, i = indx_i , j = j, value = -1*(abs(dtGLAS[indx_i, j, with = FALSE])) )   
 }
 
 indx_i <- which(dtGLAS$QUANTITY < 0 & dtGLAS$RPA_TTC == "Z307")
@@ -600,4 +600,17 @@ Link Value	Description
 5	Invoice where Merchandise Category Level 2 110 - Contact Lenses in combination with Merchandise Category Level 2 120 – Contact Lens Solutions 
 
 
+```{r PH}
+dtPH <- fread("c:/FTP/PH.csv")
+
+indx_i <- which(dtPH$QUANTITY < 0)
+for(j in c(16L:21L, 23L, 24L)){
+  set(x = dtPH, i = indx_i , j = j, value = -1*(abs(dtPH[indx_i, j, with = FALSE])) )   
+}
+
+indx_i <- which(dtPH$QUANTITY < 0 & dtPH$RPA_TTC == "Z307")
+for(j in c(13L, 16L:21L, 23L, 24L)){
+  set(x = dtPH, i = indx_i , j = j, value = 0)  
+}
+```
 

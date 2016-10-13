@@ -1,0 +1,195 @@
+---
+title: "Legacy Visitors - Apollo Optik - "
+author: "F.J.Padt"
+date: "`r Sys.Date()`"
+output: 
+   pdf_document:
+    toc:             true
+    toc_depth:       2
+    number_sections: true
+    fig_caption:     true
+    fig_crop:        true
+    highlight:       tango    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+\newpage
+![Logo](http://www.grandvision.com/img/logoGV.png) 
+
+[DESIGN](https://projects.gvshare.com/iSynergy/01_Release_1/06._Reporting/02._Design/01._FDs/R20_POS Sales - Margin/)
+
+```{r RSetup, echo=FALSE, eval=TRUE, cache=FALSE, results='hide'}
+
+rm(list=ls())
+gc()
+
+source('../QAR/00_RProj/00_Global/iSynGeneral.R')
+
+
+# Data Settings
+fECHO    <- TRUE
+fEVAL    <- TRUE
+fRESULTS <- 'hide' 
+fIMAGE   <- FALSE 
+
+# SAP systems to use
+pECC_SYST <- "RP1"
+pECC_CLNT <- "300"
+pBI_SYST  <- "BTP" 
+pBI_CLNT  <- "300"
+pLGCINDC  <- "C"
+
+# Data Settings
+pOPCO     <- "APPO"
+pDS       <- "G1_DS_VISITORS_TD"
+pROWS     <- -1L
+pSMALL    <- 1000
+pEXMP     <- 50 
+pEXP      <- FALSE
+pPath     <- "./60_Results" 
+pXLSX     <- paste0(pOPCO, "_APPOLO_VIST_") 
+pEXPORT   <- paste0("G1_DS_VISITORS_TD" , ".csv") 
+
+# Open Excel for storing results
+if(file.exists(paste0(pPath, "/", pXLSX, ".xlsx")) == TRUE){
+   file.remove(paste0(pPath, "/", pXLSX, ".xlsx"))
+}
+
+fWriteToSheet(data.frame(ECCSYST = pECC_SYST, 
+                         ECCCLNT = pECC_CLNT,
+                         BI_SYST = pBI_SYST ,
+                         BI_CLNT = pBI_CLNT), 
+              pPath, pXLSX, "PARAM", pAppend = FALSE )
+```
+
+```{r ReadRawData, echo=fECHO, eval=fEVAL}
+
+dtPLANT      <- fGetEXPTable(pTable  = "#BI0#PPLANT",
+                             pKey    = "PLANT",
+                             pSystID = pBI_SYST, pClient = pBI_CLNT)
+
+#Load transactional data
+dtDATA     <- fread(file.path(".", "RAW_DATA", "DE_VIST.csv"),  
+                    sep = ";", nrows = pROWS, colClasses="character") 
+dtNEDAPM   <- fread(file.path(".", "RAW_DATA", "NEDAPM.csv"),  
+                    sep = ";", nrows = pROWS, colClasses="character") 
+
+# Keep open stores
+dtNEDAPM   <- dtNEDAPM[!substr(PLANT,1,1) == "C"]
+
+setnames(
+  dtDATA,
+  c("V1", "V2"   , "V3"    , "V4"      , "V5" , "V6"),
+  c("V1", "REGHR", "CALDAY", "G1LGSTNO", "DIR", "COUNT")
+)
+
+```
+
+# Historical Data #
+
+The historical data for `r pOPCO` is extracted from TM1 as one big data set. 
+
+From:    `r min(dtDATA$SLSDATE)` 
+To:      `r max(dtDATA$SLSDATE)`
+Records: `r nrow(dtDATA)`
+
+## Source Data 
+
+```{r PrepareDataSet, echo=fECHO, eval=fEVAL, results=fRESULTS}
+
+# Transform from long to wide
+dtDATA <- dcast.data.table(dtDATA, G1LGSTNO + CALDAY + REGHR ~ DIR, value.var = "COUNT")
+setnames(dtDATA, gsub("Kunden ", "", colnames(dtDATA)  )) # note the space after kunden
+
+if(fIMAGE){save.image(file = paste0("DE_VIST", 
+                                    format(today(), "%Y%m%d"), 
+                                    "_PrepareDataSet", ".RData" ))}
+```
+
+Below the structure of the source data and the number of records is displayed
+
+```{r displayDetailMean, echo=fECHO, eval=fEVAL, results='markup'}
+
+fWriteToSheet(head(dtDATA[1:pEXMP]), 
+               pPath, pXLSX, "EXAMPLE_DATA_BEFORE"   , pAppend = TRUE)
+```
+
+```{r ChangeDataTypes, echo=fECHO, eval=fEVAL, results=fRESULTS}
+# Change data Types and set NA to 0
+
+dtDATA <- dtDATA[, `:=`(
+  RECORDMODE = "N",
+  G1LGSTNO   = str_pad(G1LGSTNO, 6, pad = "0" ),
+  CALDAY     = paste0(substr(CALDAY, 7, 10), substr(CALDAY, 4, 5), substr(CALDAY, 1, 2)),
+  REGHR      = paste0(str_pad(gsub(pattern = ":", replacement = "", REGHR), 
+                              4, pad ="0"), "00"),
+  IN         = as.integer(IN),
+  OUT        = as.integer(OUT))]
+
+setkey(dtDATA, "G1LGSTNO", "CALDAY", "REGHR")
+
+gc()
+
+fWriteToSheet(head(dtDATA[1:pEXMP]), 
+               pPath, pXLSX, "EXAMPLE_DATA_AFTER"   , pAppend = TRUE)
+
+if (fIMAGE){save.image(file = paste0("DEVIST", 
+                                     format(today(), "%Y%m%d"), 
+                                     "_ChangeDataTypes", ".RData" ))}
+```
+
+### Data Preparation
+
+### Data Source
+
+```{r LegacyStoreToSAP, echo=fECHO, eval=fEVAL, results=fRESULTS}
+
+# add the iSynergy Store next to the legacy store
+
+dtPLANT <- dtPLANT[SALESORG %in% c("DE01")]
+
+# Allign with ECC Logic
+# dtPLANT <- dtPLANT[nchar(G1LGSTNO) != 4 & 
+#                    !is.na(G1LGSTNO) &
+#                      G1LGSTNO != ""]
+# setkey(dtPLANT, PLANT)
+
+setnames(dtNEDAPM, 
+         c("TM1"),
+         c("G1LGSTNO"))
+
+dtPLANT <- dtNEDAPM[, .(G1LGSTNO, PLANT)]
+# Map the data Of the Legacy Stores
+system.time(
+  dtDATA <- dtPLANT[dtDATA, 
+               on = c("G1LGSTNO")])
+
+dtREST <- dtDATA[is.na(PLANT)]
+dtDATA <- dtDATA[!is.na(PLANT)]
+
+if (fIMAGE){save.image(file = paste0("DE_VIST", 
+                                     format(today(), "%Y%m%d"), 
+                                     "_LegacyStoreToSAP", ".RData" ))}
+
+```
+
+
+```{r EXPORT, echo=fECHO, eval=fECHO}
+ setnames(dtDATA,
+         c("IN" , "OUT"),
+         c("IN1", "OUT1")
+         )
+
+# Select and Order the fields in the same order as the DataSource
+dtDATA <- fAlignDS(pDT =  dtDATA, pDS = pDS, 
+                   pSystID = "BD1", pClient = "100")
+
+write.table(dtDATA, file = file.path("c:", "FTP", pEXPORT),
+            quote = TRUE     , sep = ";", na = "", dec = ".",             
+            row.names = FALSE, col.names = TRUE, append = FALSE)
+```
+

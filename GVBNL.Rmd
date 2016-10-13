@@ -47,7 +47,7 @@ pEXMP     <- 50
 pEXP      <- FALSE
 pPath     <- "./60_Results" 
 pXLSX     <- paste0(pOPCO, "_SALES_", pARTGRP) 
-# pEXPORT   <- paste0("POS_HISTORY" , ".csv") 
+pEXPORT   <- paste0("POS_HISTORY" , ".csv") 
 
 # Open Excel for storing results
 if(file.exists(paste0(pPath, "/", pXLSX, ".xlsx")) == TRUE){
@@ -449,6 +449,13 @@ gc()
 
 ```
 
+```{r ORDERTYPE}
+dtORDTYP <- fread("./RAW_DATA/ORDERTYPE.csv")[, .(OrderType, RPA_TTC)]
+setnames(dtDATA, "RPA_TTC", "OrderType")
+dtDATA <- dtORDTYP[dtDATA, on = "OrderType"]
+dtDATA[, OrderType:=NULL]
+```
+
 ```{r EXPORT, echo=fECHO, eval=fECHO}
 setnames(dtDATA,
          c("CALDAY" , "LMTNR"    , "MATNR"   , "NSITX"),
@@ -464,6 +471,7 @@ write.table(dtDATA, file = file.path("c:", "FTP", paste0("GVBNL", "_", pARTGRP, 
             quote = TRUE     , sep = ",", na = "", dec = ".",             
             row.names = FALSE, col.names = TRUE, append = FALSE)
 ```
+
 
 ```{r EXPORT_DUMMY}
 # dt0MAT_DUM = MD for 0MATERIAL Upload
@@ -537,6 +545,7 @@ rm(dtNLa)
 # Add Link value
 dtLNK <- fread("c:/FTP/WGH_COMB.csv")
 dtLNK <- dtLNK[, .(G1WGHCMB, LNK)]
+dtLNK[, G1WGHCMB:= as.numeric(G1WGHCMB)]
 dtNL <-  dtLNK[dtNL, on = "G1WGHCMB"]
 dtNL[, G1LINKV:= NULL]
 setnames(dtNL, "LNK", "G1LINKV")
@@ -572,6 +581,7 @@ dtNL <- fAlignDS(pDT =  dtNL, pDS = "G1_DS_PA_HIST_FLAT_FILE")
 
 # dtDS <- fGetDS()
 # dtNL <- dtNL[, dtDS[DATASOURCE == "G1_DS_PA_HIST_FLAT_FILE", FIELDNM], with = FALSE]
+# pEXPORT <- "GVBNL_POS_HISTORY.CSV"
 
 write.table(dtNL, 
             file = file.path("c:", "FTP", pEXPORT),

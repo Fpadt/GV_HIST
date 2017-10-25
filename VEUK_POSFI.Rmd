@@ -20,7 +20,7 @@ knitr::opts_chunk$set(echo = TRUE)
 \newpage
 ![Logo](http://www.grandvision.com/img/logoGV.png) 
 
-[DESIGN](https://projects.gvshare.com/iSynergy/01_Release_1/06._Reporting/02._Design/01._FDs/R20_POS Sales - Margin/)
+[DESIGN](https://grandvision.sharepoint.com/sites/NL1-Proj-iSynergy/01_Release_1/06._Reporting/02._Design/01._FDs/R20_POS%20Sales%20-%20Margin/POS%20sales%20and%20margin_calc_v1.3.xlsx?d=w9eec9db1096e4abe91ac1f0abfa3333b&csf=1)
 
 ```{r RSetup, echo=FALSE, eval=TRUE, cache=FALSE, results='hide'}
 
